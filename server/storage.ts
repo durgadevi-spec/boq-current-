@@ -12,6 +12,8 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   getAllUsers?(): Promise<User[]>;
+  logActivity?(data: any): Promise<void>;
+  getAuditLogs?(): Promise<any[]>;
 }
 
 /* ================= POSTGRES STORAGE (SUPABASE) ================= */
@@ -38,16 +40,65 @@ export class PostgresStorage implements IStorage {
       );
     });
 
-    // Comment this if you don't want demo users
-    this.seedDemoUsers().catch(console.error);
-
-    // Ensure audit logs table exists
     this.ensureAuditLogsTable().catch((err) => {
       console.warn(
         "[storage] Could not ensure audit_logs table:",
         (err as any)?.message || err
       );
     });
+
+    // Comment this if you don't want demo users
+    this.seedDemoUsers().catch(console.error);
+  }
+
+  private async ensureAuditLogsTable(): Promise<void> {
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id VARCHAR(36),
+        username TEXT,
+        user_role TEXT,
+        action TEXT NOT NULL,
+        module TEXT,
+        description TEXT,
+        metadata JSONB,
+        ip_address TEXT,
+        requested_at TIMESTAMPTZ DEFAULT now()
+      )
+    `);
+    await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_requested_at ON audit_logs(requested_at)`);
+    await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id)`);
+    console.log("[storage] audit_logs table verified/created");
+  }
+
+  async logActivity(data: {
+    userId?: string;
+    username?: string;
+    userRole?: string;
+    action: string;
+    module?: string;
+    description?: string;
+    metadata?: any;
+    ipAddress?: string;
+  }): Promise<void> {
+    try {
+      await this.pool.query(
+        `INSERT INTO audit_logs (user_id, username, user_role, action, module, description, metadata, ip_address) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          data.userId || null,
+          data.username || null,
+          data.userRole || null,
+          data.action,
+          data.module || null,
+          data.description || null,
+          data.metadata ? JSON.stringify(data.metadata) : null,
+          data.ipAddress || null,
+        ]
+      );
+    } catch (err) {
+      console.error("[storage] logActivity failed:", err);
+    }
   }
 
   private async ensureShopsColumns(): Promise<void> {
@@ -68,54 +119,6 @@ export class PostgresStorage implements IStorage {
     );
   }
 
-  private async ensureAuditLogsTable(): Promise<void> {
-    // Create table if not exists
-    await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS audit_logs (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id VARCHAR(36),
-        username TEXT,
-        role TEXT,
-        action TEXT NOT NULL,
-        module TEXT,
-        page TEXT,
-        details TEXT,
-        before_data TEXT,
-        after_data TEXT,
-        ip_address TEXT,
-        user_agent TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      )
-    `);
-
-    // Ensure all columns exist individually (in case table was created partially)
-    const columns = [
-      { name: "user_id", type: "VARCHAR(36)" },
-      { name: "username", type: "TEXT" },
-      { name: "role", type: "TEXT" },
-      { name: "action", type: "TEXT" },
-      { name: "module", type: "TEXT" },
-      { name: "page", type: "TEXT" },
-      { name: "details", type: "TEXT" },
-      { name: "before_data", type: "TEXT" },
-      { name: "after_data", type: "TEXT" },
-      { name: "ip_address", type: "TEXT" },
-      { name: "user_agent", type: "TEXT" },
-      { name: "created_at", type: "TIMESTAMP WITH TIME ZONE DEFAULT NOW()" }
-    ];
-
-    for (const col of columns) {
-      try {
-        await this.pool.query(
-          `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`
-        );
-      } catch (e) {
-        console.warn(`[storage] Could not add column ${col.name} to audit_logs:`, (e as any).message);
-      }
-    }
-    console.log("[storage] Successfully ensured audit_logs table and columns");
-  }
-
   private mapDbUser(row: any): User {
     // Map snake_case DB columns -> camelCase app fields
     // (keep all other properties if schema expects them)
@@ -131,7 +134,6 @@ export class PostgresStorage implements IStorage {
       vendorCategories: row.vendor_categories ?? row.vendorCategories ?? null,
       createdAt: row.created_at ?? row.createdAt ?? null,
       updatedAt: row.updated_at ?? row.updatedAt ?? null,
-      shopId: row.shop_id ?? row.shopId ?? null,
     };
 
     // Ensure approved always has a usable value
@@ -194,24 +196,23 @@ export class PostgresStorage implements IStorage {
     const result = await this.pool.query(
       `
       SELECT
-        u.id,
-        u.username,
-        u.password,
-        u.role,
-        u.approved,
-        u.approval_reason,
-        u.full_name,
-        u.mobile_number,
-        u.department,
-        u.employee_code,
-        u.company_name,
-        u.gst_number,
-        u.business_address,
-        u.created_at,
-        u.updated_at,
-        (SELECT s.id FROM shops s WHERE s.owner_id::text = u.id::text LIMIT 1) as shop_id
-      FROM users u
-      WHERE u.id = $1
+        id,
+        username,
+        password,
+        role,
+        approved,
+        approval_reason,
+        full_name,
+        mobile_number,
+        department,
+        employee_code,
+        company_name,
+        gst_number,
+        business_address,
+        created_at,
+        updated_at
+      FROM users
+      WHERE id = $1
       `,
       [id]
     );
@@ -226,24 +227,23 @@ export class PostgresStorage implements IStorage {
     const result = await this.pool.query(
       `
       SELECT
-        u.id,
-        u.username,
-        u.password,
-        u.role,
-        u.approved,
-        u.approval_reason,
-        u.full_name,
-        u.mobile_number,
-        u.department,
-        u.employee_code,
-        u.company_name,
-        u.gst_number,
-        u.business_address,
-        u.created_at,
-        u.updated_at,
-        (SELECT s.id FROM shops s WHERE s.owner_id::text = u.id::text LIMIT 1) as shop_id
-      FROM users u
-      WHERE u.username = $1
+        id,
+        username,
+        password,
+        role,
+        approved,
+        approval_reason,
+        full_name,
+        mobile_number,
+        department,
+        employee_code,
+        company_name,
+        gst_number,
+        business_address,
+        created_at,
+        updated_at
+      FROM users
+      WHERE username = $1
       LIMIT 1
       `,
       [username]
@@ -324,26 +324,32 @@ export class PostgresStorage implements IStorage {
     const result = await this.pool.query(
       `
       SELECT
-        u.id,
-        u.username,
-        u.password,
-        u.role,
-        u.approved,
-        u.approval_reason,
-        u.full_name,
-        u.mobile_number,
-        u.department,
-        u.employee_code,
-        u.company_name,
-        u.gst_number,
-        u.business_address,
-        u.created_at,
-        u.updated_at,
-        (SELECT s.id FROM shops s WHERE s.owner_id::text = u.id::text LIMIT 1) as shop_id
-      FROM users u
+        id,
+        username,
+        password,
+        role,
+        approved,
+        approval_reason,
+        full_name,
+        mobile_number,
+        department,
+        employee_code,
+        company_name,
+        gst_number,
+        business_address,
+        created_at,
+        updated_at
+      FROM users
       `
     );
     return result.rows.map((r) => this.mapDbUser(r));
+  }
+
+  async getAuditLogs(): Promise<any[]> {
+    const result = await this.pool.query(
+      "SELECT id::text, user_id, username, user_role, action, module, description, metadata, ip_address, requested_at FROM audit_logs ORDER BY requested_at DESC LIMIT 1000"
+    );
+    return result.rows;
   }
 }
 
@@ -428,6 +434,20 @@ export class MemStorage implements IStorage {
 
     this.users.set(id, newUser);
     return newUser;
+  }
+
+  private auditLogs: any[] = [];
+  async logActivity(data: any): Promise<void> {
+    this.auditLogs.push({
+      id: randomUUID(),
+      requested_at: new Date(),
+      ...data
+    });
+    if (this.auditLogs.length > 1000) this.auditLogs.shift();
+  }
+
+  async getAuditLogs(): Promise<any[]> {
+    return [...this.auditLogs].reverse();
   }
 }
 

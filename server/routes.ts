@@ -4607,12 +4607,29 @@ export async function registerRoutes(
 
         // Copy items from previous version if requested
         if (copy_from_version) {
+          // Fetch items for this version specifically, and only active (user_added) ones
+          // Also ensuring items actually belong to this project for data integrity
           const itemsResult = await query(
-            `SELECT * FROM boq_items WHERE version_id = $1 ORDER BY sort_order ASC, created_at ASC`,
-            [copy_from_version],
+            `SELECT * FROM boq_items 
+             WHERE version_id = $1 
+             AND project_id = $2 
+             AND user_added = true
+             ORDER BY sort_order ASC, created_at ASC`,
+            [copy_from_version, project_id],
           );
 
+          const archivedItemIds = archiveService.getArchivedItemIds("boq_items");
+          const trashedItemIds = archiveService.getTrashedItemIds("boq_items");
+
+          console.log(`Copying ${itemsResult.rows.length} items from version ${copy_from_version} to ${versionId}`);
+
+          const archivedIds = archiveService.getArchivedItemIds('boq_items');
+          const trashedIds = archiveService.getTrashedItemIds('boq_items');
+
           for (const item of itemsResult.rows) {
+            // Skip archived or trashed items
+            if (archivedIds.includes(item.id) || trashedIds.includes(item.id)) continue;
+
             const newItemId = `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
             await query(
               `INSERT INTO boq_items (id, project_id, estimator, table_data, version_id, sort_order, user_added, created_at)
@@ -5240,14 +5257,41 @@ export async function registerRoutes(
           try { tableData = JSON.parse(tableData); } catch (e) { return; }
         }
 
-        const items = tableData.step11_items || [];
-        if (Array.isArray(items)) {
-          items.forEach((item: any) => {
-            const qty = parseFloat(item.qty) || 0;
-            const supply = parseFloat(item.supply_rate) || 0;
-            const install = parseFloat(item.install_rate) || 0;
-            totalValue += qty * (supply + install);
-          });
+        // Logic must handle BOTH Engine-based (with materialLines) and Manual items
+        if (tableData.materialLines && tableData.targetRequiredQty !== undefined && tableData.configBasis) {
+          // Re-calculate the grandTotal for the Engine item
+          // Note: On server side we might not have computeBoq directly but we can sum materialLines
+          const requiredQty = Number(tableData.targetRequiredQty) || 0;
+          let itemSubtotal = 0;
+          if (Array.isArray(tableData.materialLines)) {
+            tableData.materialLines.forEach((line: any) => {
+              const perUnitQty = Number(line.perUnitQty) || 0;
+              const rate = (Number(line.supplyRate) || 0) + (Number(line.installRate) || 0);
+              itemSubtotal += (requiredQty * perUnitQty) * rate;
+            });
+          }
+          
+          // Also add manual items attached to this engine product
+          if (Array.isArray(tableData.step11_items)) {
+            tableData.step11_items.forEach((item: any) => {
+              const qty = parseFloat(item.qty) || 0;
+              const supply = parseFloat(item.supply_rate || item.rate || 0); // handle rate/supply_rate
+              const install = parseFloat(item.install_rate) || 0;
+              itemSubtotal += qty * (supply + install);
+            });
+          }
+          totalValue += itemSubtotal;
+        } else {
+          // Manual items only
+          const items = tableData.step11_items || [];
+          if (Array.isArray(items)) {
+            items.forEach((item: any) => {
+              const qty = parseFloat(item.qty) || 0;
+              const supply = parseFloat(item.supply_rate || item.rate || 0);
+              const install = parseFloat(item.install_rate) || 0;
+              totalValue += qty * (supply + install);
+            });
+          }
         }
       });
 
