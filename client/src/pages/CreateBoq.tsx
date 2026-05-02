@@ -1845,12 +1845,12 @@ export default function CreateBom() {
       if (sketchResp.ok) {
         const sData = await sketchResp.json();
         const parsedTemplates = (sData.templates || []).map((t: any) => {
-          let itemCount = 0;
-          try {
-            const data = typeof t.template_data === 'string' ? JSON.parse(t.template_data) : t.template_data;
-            itemCount = Array.isArray(data) ? data.length : (data?.items?.length || 0);
-          } catch (e) { /* ignore */ }
-          return { ...t, itemCount };
+          // Use pre-calculated fields from optimized API
+          return { 
+            ...t, 
+            itemCount: t.item_count ?? 0,
+            created_at: t.last_updated 
+          };
         });
         setSketchTemplates(parsedTemplates);
       }
@@ -2043,6 +2043,20 @@ export default function CreateBom() {
 
     try {
       let data = template.template_data;
+      
+      // If template_data is missing (due to optimized list API), fetch full details
+      if (!data) {
+        const detailResp = await apiFetch(`/api/sketch-templates/${template.id}`);
+        if (detailResp.ok) {
+          const detailData = await detailResp.json();
+          data = detailData.template?.template_data;
+        } else {
+          toast({ title: "Error", description: "Failed to fetch template details", variant: "destructive" });
+          setIsSaving(false);
+          return;
+        }
+      }
+
       if (typeof data === 'string') {
         try { data = JSON.parse(data); } catch (e) { console.error("Parse error", e); setIsSaving(false); return; }
       }
