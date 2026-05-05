@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import apiFetch from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { fuzzySearch } from "@/lib/utils";
 
 type Product = {
   id: string;
@@ -162,20 +163,9 @@ export default function ProductPicker({
       }
       // Text search
       if (query) {
-        const name = product.name?.toLowerCase() || "";
-        const category = product.category?.toLowerCase() || "";
-        const subcategory = product.subcategory?.toLowerCase() || "";
-        const categoryName = product.category_name?.toLowerCase() || "";
-        const subcategoryName = product.subcategory_name?.toLowerCase() || "";
-        const description = product.description?.toLowerCase() || "";
-        const matched =
-          name.includes(query) ||
-          category.includes(query) ||
-          subcategory.includes(query) ||
-          categoryName.includes(query) ||
-          subcategoryName.includes(query) ||
-          description.includes(query);
-        if (!matched) return false;
+        const name = product.name || "";
+        const description = product.description || "";
+        if (!fuzzySearch(query, [name, description])) return false;
       }
       return true;
     });

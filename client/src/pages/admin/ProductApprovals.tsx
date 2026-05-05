@@ -62,6 +62,7 @@ type ApprovalItem = {
 export default function ProductApprovals() {
   const [, setLocation] = useLocation();
   const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [expandedItems, setExpandedItems] = useState<ApprovalItem[]>([]);
@@ -297,7 +298,7 @@ export default function ProductApprovals() {
       return;
     }
     // select all ids currently shown
-    const ids = approvals.map(a => a.id);
+    const ids = filteredApprovals.map(a => a.id);
     setSelectedIds(ids);
   };
 
@@ -382,7 +383,20 @@ export default function ProductApprovals() {
   };
 
   const pendingApprovals = approvals.filter(a => a.status === "pending");
-  const pendingCount = pendingApprovals.filter(a => a.status === "pending").length;
+  const pendingCount = pendingApprovals.length;
+
+  const searchLower = searchQuery.toLowerCase().trim();
+  const filteredApprovals = approvals.filter(a => {
+    if (!searchLower) return true;
+    return (
+      (a.product_name || "").toLowerCase().includes(searchLower) ||
+      (a.config_name || "Default").toLowerCase().includes(searchLower) ||
+      (a.created_by || "").toLowerCase().includes(searchLower) ||
+      (a.status || "").toLowerCase().includes(searchLower) ||
+      (a.total_cost?.toString() || "").includes(searchLower) ||
+      (a.category_id || "").toLowerCase().includes(searchLower)
+    );
+  });
 
   return (
     <Layout>
@@ -413,17 +427,25 @@ export default function ProductApprovals() {
                 No approval requests found.
               </div>
             ) : (
-              <div className="space-y-0">
-                {/* Bulk action bar */}
-                {!isViewOnly && selectedIds.length > 0 && (
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="text-sm font-bold">{selectedIds.length} selected</div>
-                    <Button size="sm" onClick={bulkApprove} disabled={actionLoading != null} className="bg-green-600 hover:bg-green-700 text-white h-8 px-3">Approve Selected</Button>
-                    <Button size="sm" variant="destructive" onClick={bulkReject} disabled={actionLoading != null} className="h-8 px-3">Reject Selected</Button>
-                    <Button size="sm" variant="outline" onClick={bulkDelete} disabled={actionLoading != null} className="h-8 px-3 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700">Delete Selected</Button>
-                    <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])} disabled={actionLoading != null} className="h-8 px-3">Clear</Button>
-                  </div>
-                )}
+              <div className="space-y-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                  <Input
+                    placeholder="Search products, config, or submitter..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="max-w-md bg-white"
+                  />
+                  {/* Bulk action bar */}
+                  {!isViewOnly && selectedIds.length > 0 && (
+                    <div className="flex items-center gap-3">
+                      <div className="text-sm font-bold">{selectedIds.length} selected</div>
+                      <Button size="sm" onClick={bulkApprove} disabled={actionLoading != null} className="bg-green-600 hover:bg-green-700 text-white h-8 px-3">Approve Selected</Button>
+                      <Button size="sm" variant="destructive" onClick={bulkReject} disabled={actionLoading != null} className="h-8 px-3">Reject Selected</Button>
+                      <Button size="sm" variant="outline" onClick={bulkDelete} disabled={actionLoading != null} className="h-8 px-3 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700">Delete Selected</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])} disabled={actionLoading != null} className="h-8 px-3">Clear</Button>
+                    </div>
+                  )}
+                </div>
                 <div className="rounded-xl border shadow-sm overflow-hidden bg-white">
                   <Table>
                     <TableHeader className="bg-muted/30">
@@ -432,7 +454,7 @@ export default function ProductApprovals() {
                         <TableHead className="w-[40px]">
                           <div className="flex items-center justify-center">
                             <Checkbox
-                              checked={approvals.length > 0 && selectedIds.length === approvals.length}
+                              checked={filteredApprovals.length > 0 && selectedIds.length === filteredApprovals.length}
                               onCheckedChange={(v) => toggleSelectAll(v as boolean)}
                               onClick={(e) => e.stopPropagation()}
                             />
@@ -448,9 +470,16 @@ export default function ProductApprovals() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {approvals.map((approval) => (
-                        <>
-                          <TableRow
+                      {filteredApprovals.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                            No products match your search.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredApprovals.map((approval) => (
+                          <>
+                            <TableRow
                             key={approval.id}
                             className="hover:bg-muted/10 cursor-pointer transition-colors"
                             onClick={() => toggleExpand(approval.id)}
@@ -809,7 +838,8 @@ export default function ProductApprovals() {
                             </TableRow>
                           )}
                         </>
-                      ))}
+                      ))
+                    )}
                     </TableBody>
                   </Table>
                 </div>

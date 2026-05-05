@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Reorder, useDragControls } from "framer-motion";
-import { ChevronUp, ChevronDown, Loader2, CheckCircle2, XCircle, Lock, History, Clock, Briefcase, MapPin, IndianRupee, GripVertical, Search, ArrowUp, ArrowLeft, Plus, Trash2, Save, MessageSquare, Users, ChevronsUpDown, Check, X, RefreshCw, Star, Edit, Reply } from "lucide-react";
+import { ChevronUp, ChevronDown, Loader2, CheckCircle2, XCircle, Lock, History, Clock, Briefcase, MapPin, IndianRupee, GripVertical, Search, ArrowUp, ArrowLeft, ArrowRight, ArrowDown, Plus, Trash2, Save, MessageSquare, Users, ChevronsUpDown, Check, X, RefreshCw, Star, Edit, Reply } from "lucide-react";
 import { fuzzySearch, cn } from "@/lib/utils";
 import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -1732,6 +1732,8 @@ export default function CreateBom() {
   const [versions, setVersions] = useState<BOMVersion[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const selectedProject = projects.find(p => p.id === selectedProjectId);
+  const selectedVersion = versions.find(v => v.id === selectedVersionId);
   const [history, setHistory] = useState<BOMHistory[]>([]);
   const [showProductPicker, setShowProductPicker] = useState(false);
   const [showMaterialPicker, setShowMaterialPicker] = useState(false);
@@ -1761,19 +1763,62 @@ export default function CreateBom() {
   const [ignoredMismatches, setIgnoredMismatches] = useState<Set<string>>(new Set());
   const [projectStatusFilter, setProjectStatusFilter] = useState<string>("all");
   const [projectSearchTerm, setProjectSearchTerm] = useState("");
+  const [productCategoryOrder, setProductCategoryOrder] = useState<string[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [isSinglePage, setIsSinglePage] = useState(false);
 
   const productCategories = useMemo(() => {
     const cats = new Set<string>();
     boqItems.forEach(item => {
       const td = parseTableData(item.table_data);
-      // Only include categories from real products (those with a product_id).
-      // Items added via "Add Item" have no product_id and must not pollute the product filter.
-      if (!td.product_id) return;
       const c = td.category_name || td.category || "General";
       if (c) cats.add(c);
     });
     return Array.from(cats).sort();
   }, [boqItems]);
+
+  useEffect(() => {
+    // If the version has a saved order, use it
+    if (selectedVersion && (selectedVersion as any).category_order) {
+      try {
+        const savedOrder = (selectedVersion as any).category_order;
+        if (Array.isArray(savedOrder) && savedOrder.length > 0) {
+          setProductCategoryOrder(savedOrder);
+          return;
+        }
+      } catch (e) { console.error("Failed to parse category_order", e); }
+    }
+
+    // Otherwise, derive from current items
+    if (productCategories.length > 0) {
+      setProductCategoryOrder(prev => {
+        const newCats = productCategories.filter(c => !prev.includes(c));
+        const stillPresent = prev.filter(c => productCategories.includes(c));
+        return [...stillPresent, ...newCats];
+      });
+    }
+  }, [productCategories, selectedVersionId, selectedVersion]);
+
+  // Auto-save category order when it changes
+  useEffect(() => {
+    if (selectedVersionId && productCategoryOrder.length > 0) {
+      const saveOrder = async () => {
+        try {
+          await apiFetch(`/api/boq-versions/${selectedVersionId}/category-order`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ categoryOrder: productCategoryOrder })
+          });
+        } catch (err) {
+          console.error("Failed to auto-save category order", err);
+        }
+      };
+      
+      const timer = setTimeout(saveOrder, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [productCategoryOrder, selectedVersionId]);
 
   const itemCategories = useMemo(() => {
     const cats = new Set<string>();
@@ -2819,8 +2864,6 @@ export default function CreateBom() {
     }, 0);
   };
 
-  const selectedProject = projects.find(p => p.id === selectedProjectId);
-  const selectedVersion = versions.find(v => v.id === selectedVersionId);
 
   const projectBudget = parseFloat(selectedProject?.budget || "0");
   const currentProjectValue = calculateCurrentProjectValue();
@@ -4379,48 +4422,102 @@ export default function CreateBom() {
                 <Card>
                   <CardContent className="space-y-0 pt-0">
                     <div className="sticky top-0 z-20 bg-white rounded-t-lg shadow-sm border-b border-slate-200 p-6 pb-4">
-                      <div className="flex items-center justify-between">
-                        <h2 className="text-lg font-bold text-gray-800">BOQ Items</h2>
-                        <div className="flex items-center gap-4">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setIsCompactView(!isCompactView)}
-                            className={`h-9 px-3 font-semibold ${isCompactView ? 'bg-blue-50 text-blue-600 border-blue-300' : 'text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-                          >
-                            Compact View
-                          </Button>
-                          <div className="flex items-center gap-2">
-                            <Select value={productCategoryFilter} onValueChange={setProductCategoryFilter}>
-                              <SelectTrigger className="h-9 w-[160px] text-xs border-slate-200">
-                                <SelectValue placeholder="Product Category" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="all">All Products</SelectItem>
-                                {productCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                              </SelectContent>
-                            </Select>
+                      <div className="flex flex-col gap-4">
+                        <div className="flex items-center justify-between">
+                          <h2 className="text-lg font-bold text-gray-800">BOQ Items</h2>
+                          <div className="flex items-center gap-4">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setIsCompactView(!isCompactView)}
+                              className={`h-9 px-3 font-semibold ${isCompactView ? 'bg-blue-50 text-blue-600 border-blue-300' : 'text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                            >
+                              Compact View
+                            </Button>
+                            <div className="flex items-center gap-2">
+                              <Select value={itemCategoryFilter} onValueChange={setItemCategoryFilter}>
+                                <SelectTrigger className="h-9 w-[160px] text-xs border-slate-200">
+                                  <SelectValue placeholder="Item Category" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All Item Categories</SelectItem>
+                                  {itemCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
 
-                            <Select value={itemCategoryFilter} onValueChange={setItemCategoryFilter}>
-                              <SelectTrigger className="h-9 w-[160px] text-xs border-slate-200">
-                                <SelectValue placeholder="Item Category" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="all">All Item Categories</SelectItem>
-                                {itemCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                              </SelectContent>
-                            </Select>
+                              <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setCurrentPage(1); }}>
+                                <SelectTrigger className="h-9 w-[100px] text-xs border-slate-200">
+                                  <SelectValue placeholder="Page Size" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="10">10 / page</SelectItem>
+                                  <SelectItem value="20">20 / page</SelectItem>
+                                  <SelectItem value="50">50 / page</SelectItem>
+                                  <SelectItem value="100">100 / page</SelectItem>
+                                </SelectContent>
+                              </Select>
 
-                            <div className="relative w-64">
-                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                              <Input
-                                placeholder="Search products..."
-                                value={productSearch}
-                                onChange={(e) => setProductSearch(e.target.value)}
-                                className="pl-9 h-9 text-sm border-slate-200 focus:ring-blue-500 shadow-sm"
-                              />
+                              <div className="relative w-64">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                                <Input
+                                  placeholder="Search products..."
+                                  value={productSearch}
+                                  onChange={(e) => setProductSearch(e.target.value)}
+                                  className="pl-9 h-9 text-sm border-slate-200 focus:ring-blue-500 shadow-sm"
+                                />
+                              </div>
                             </div>
                           </div>
+                        </div>
+
+                        <div className="overflow-x-auto pb-2 custom-scrollbar">
+                          <Tabs value={productCategoryFilter} onValueChange={(v) => { setProductCategoryFilter(v); setCurrentPage(1); }} className="w-full">
+                            <TabsList className="bg-transparent p-0 flex justify-start h-10 flex-nowrap gap-1 w-full overflow-visible">
+                              <TabsTrigger
+                                value="all"
+                                className={cn(
+                                  "px-4 h-9 text-[11px] font-bold uppercase tracking-wider transition-all border shrink-0",
+                                  productCategoryFilter === "all"
+                                    ? "bg-blue-600 text-white border-blue-600 shadow-md translate-y-[-2px]"
+                                    : "bg-white text-slate-500 border-slate-200 hover:border-blue-300 hover:text-blue-600"
+                                )}
+                              >
+                                All ({boqItems.length})
+                              </TabsTrigger>
+                              <Reorder.Group
+                                axis="x"
+                                values={productCategoryOrder}
+                                onReorder={setProductCategoryOrder}
+                                className="flex gap-1"
+                              >
+                                {productCategoryOrder.map((cat) => {
+                                  const count = boqItems.filter(bi => {
+                                    const td = parseTableData(bi.table_data);
+                                    return (td.category_name || td.category || "General") === cat;
+                                  }).length;
+                                  return (
+                                    <Reorder.Item
+                                      key={cat}
+                                      value={cat}
+                                      className="shrink-0"
+                                    >
+                                      <TabsTrigger
+                                        value={cat}
+                                        className={cn(
+                                          "px-4 h-9 text-[11px] font-bold uppercase tracking-wider transition-all border",
+                                        productCategoryFilter === cat
+                                            ? "bg-blue-600 text-white border-blue-600 shadow-md translate-y-[-2px]"
+                                            : "bg-white text-slate-500 border-slate-200 hover:border-blue-300 hover:text-blue-600"
+                                        )}
+                                      >
+                                        {cat} ({count})
+                                      </TabsTrigger>
+                                    </Reorder.Item>
+                                  );
+                                })}
+                              </Reorder.Group>
+                            </TabsList>
+                          </Tabs>
                         </div>
                       </div>
                     </div>
@@ -4428,94 +4525,194 @@ export default function CreateBom() {
                       {boqItems.length === 0
                         ? <div className="text-gray-500 text-center py-4">No products added yet. Click Add Product +</div>
                         : <div className="space-y-6">
-                          {boqItems
-                            .filter(item => {
+                          {(() => {
+                            const sortedAllItems = [...boqItems].sort((a, b) => {
+                              if (productCategoryOrder.length === 0) return 0;
+                              const tda = parseTableData(a.table_data);
+                              const tdb = parseTableData(b.table_data);
+                              const catA = tda.category_name || tda.category || "General";
+                              const catB = tdb.category_name || tdb.category || "General";
+                              const indexA = productCategoryOrder.indexOf(catA);
+                              const indexB = productCategoryOrder.indexOf(catB);
+                              if (indexA !== -1 && indexB !== -1) {
+                                if (indexA !== indexB) return indexA - indexB;
+                              } else if (indexA !== -1) return -1;
+                              else if (indexB !== -1) return 1;
+                              return 0;
+                            });
+
+                            const filteredItems = sortedAllItems.filter(item => {
                               const td = parseTableData(item.table_data);
-                              const name = td.product_name || item.estimator || "";
-                              const desc = td.finalize_description || "";
+                              const name = td.product_name || td.item || td.name || "Unnamed Item";
+                              const desc = td.finalize_description || td.description || "";
                               const matchesSearch = fuzzySearch(productSearch, [name, desc]);
-                              const isStandaloneItem = !td.product_id;
-
-                              // Standalone items (Add Item, no product_id) should never appear when
-                              // a real product category filter is active.
-                              if (productCategoryFilter !== "all" && isStandaloneItem) return false;
-
                               const cat = td.category_name || td.category || "General";
                               const matchesProductCat = productCategoryFilter === "all" || cat === productCategoryFilter;
 
-                              // Item category filter logic
                               let hasMatchingItem = true;
                               if (itemCategoryFilter !== "all") {
-                                if (isStandaloneItem) {
-                                  // For standalone items, match by their own top-level category
-                                  hasMatchingItem = cat === itemCategoryFilter;
-                                } else {
-                                  const materialLines = td.materialLines || [];
-                                  const step11Items = td.step11_items || [];
-                                  hasMatchingItem = materialLines.some((ml: any) => (ml.category || "General") === itemCategoryFilter) ||
-                                    step11Items.some((si: any) => (si.category || "General") === itemCategoryFilter);
-                                }
+                                const materialLines = td.materialLines || [];
+                                const step11Items = td.step11_items || [];
+                                hasMatchingItem = materialLines.some((ml: any) => (ml.category || "General") === itemCategoryFilter) ||
+                                  step11Items.some((si: any) => (si.category || "General") === itemCategoryFilter);
                               }
-
                               return matchesSearch && matchesProductCat && hasMatchingItem;
-                            })
-                            .map((boqItem: BOMItem, boqIdx: number) => (
-                              <div key={boqItem.id} id={`boq-item-card-${boqItem.id}`} className="transition-all duration-300">
-                                <BoqItemCard boqItem={boqItem} boqIdx={boqIdx} isVersionSubmitted={isVersionSubmitted}
-                                  expandedProductIds={expandedProductIds} setExpandedProductIds={setExpandedProductIds}
-                                  getEditedValue={getEditedValue} updateEditedField={updateEditedField}
-                                  handleDeleteRow={handleDeleteRow} handleFinalizeProduct={handleFinalizeProduct}
-                                  handleAddItem={handleAddItem} loadBoqItemsAndEdits={loadBoqItemsAndEdits} setBoqItems={setBoqItems}
-                                  checkBudgetEarly={checkBudgetEarly} handleSaveProject={handleSaveProject}
-                                  onAnalysis={(name) => setAnalysisProduct(name)}
-                                  isCardDragOver={cardDragOverIdx === boqIdx}
-                                  onCardDragStart={(e) => { cardDragIdxRef.current = boqIdx; e.dataTransfer.effectAllowed = 'move'; }}
-                                  onCardDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setCardDragOverIdx(boqIdx); }}
-                                  onCardDrop={(e) => {
-                                    e.preventDefault();
-                                    setCardDragOverIdx(null);
-                                    const fromIdx = cardDragIdxRef.current;
-                                    if (fromIdx === null || fromIdx === boqIdx) return;
-                                    const reordered = [...boqItems];
-                                    const [moved] = reordered.splice(fromIdx, 1);
-                                    reordered.splice(boqIdx, 0, moved);
-                                    setBoqItems(reordered);
-                                    // Persist the new order
-                                    apiFetch('/api/boq-items/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ itemIds: reordered.map(i => i.id) }) }).catch(console.error);
-                                    cardDragIdxRef.current = null;
-                                  }}
-                                  mismatches={activeMismatches.filter(m => m.boqItemId === boqItem.id)}
-                                  isCompactView={isCompactView}
-                                  onSaveAsTemplate={(item) => {
-                                    setTemplateToSave(item);
-                                    setNewTemplateName(parseTableData(item.table_data).product_name || item.estimator);
-                                    setShowSaveTemplateDialog(true);
-                                  }}
-                                  editedFields={editedFields}
-                                  comments={comments}
-                                  users={users}
-                                  currentUser={user}
-                                  onAddComment={(versionId: string, itemId?: string) => {
-                                    const productName = parseTableData(boqItem.table_data).product_name || boqItem.estimator;
-                                    setCommentTarget({ type: itemId ? 'item' : 'product', id: itemId || boqItem.id, name: itemId ? `${productName} - Item ${itemId}` : productName });
-                                    setShowCommentDialog(true);
-                                  }}
-                                  selectedVersionId={selectedVersionId}
-                                  totalProducts={boqItems.length}
-                                  itemCategoryFilter={itemCategoryFilter}
-                                  bomButtonsEnabled={bomButtonsEnabled}
-                                  onProductOrdinalChange={(toIdx) => {
-                                    if (toIdx === boqIdx) return;
-                                    const reordered = [...boqItems];
-                                    const [moved] = reordered.splice(boqIdx, 1);
-                                    reordered.splice(toIdx, 0, moved);
-                                    setBoqItems(reordered);
-                                    // Persist the new order
-                                    apiFetch('/api/boq-items/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ itemIds: reordered.map(i => i.id) }) }).catch(console.error);
-                                  }}
-                                />
+                            });
+
+                            const effectivePageSize = isSinglePage ? 1000 : pageSize;
+                            const totalPages = Math.ceil(filteredItems.length / effectivePageSize);
+                            const paginatedItems = filteredItems.slice((currentPage - 1) * effectivePageSize, currentPage * effectivePageSize);
+
+                            return (
+                              <div className="space-y-6">
+                                {/* Pagination Header / Master View Bar */}
+                                <div className="flex items-center justify-between bg-slate-50 border rounded-lg p-3 px-6 shadow-sm mb-6">
+                                  <div className="flex items-center gap-3">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      disabled={currentPage === 1}
+                                      onClick={() => {
+                                        if (currentPage > 1) {
+                                          setCurrentPage(prev => prev - 1);
+                                        } else {
+                                          const catList = ["all", ...productCategoryOrder];
+                                          const currentIdx = catList.indexOf(productCategoryFilter);
+                                          if (currentIdx > 0) {
+                                            setProductCategoryFilter(catList[currentIdx - 1]);
+                                            setCurrentPage(1);
+                                          }
+                                        }
+                                      }}
+                                      className="h-9 gap-2 font-bold text-[10px] uppercase tracking-widest bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                                    >
+                                      <ArrowLeft className="w-3.5 h-3.5" /> Previous
+                                    </Button>
+
+                                    <Button
+                                      variant={isSinglePage ? "default" : "outline"}
+                                      size="sm"
+                                      onClick={() => {
+                                        setIsSinglePage(!isSinglePage);
+                                        setCurrentPage(1);
+                                      }}
+                                      className={cn(
+                                        "h-9 font-bold text-[10px] uppercase tracking-widest px-5 transition-all",
+                                        isSinglePage ? "bg-blue-600 text-white border-blue-600 shadow-md" : "bg-white border-slate-200 text-slate-600 hover:border-blue-300"
+                                      )}
+                                    >
+                                      {isSinglePage ? "Paginated View" : "Single Page"}
+                                    </Button>
+                                  </div>
+
+                                  <div className="flex flex-col items-center">
+                                    <span className="text-[11px] font-black text-blue-900 uppercase tracking-[0.25em]">Master View</span>
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">Page {currentPage} of {totalPages || 1}</span>
+                                  </div>
+
+                                  <div className="flex items-center gap-6">
+                                    <div className="flex items-center gap-1.5">
+                                      {Array.from({ length: Math.min(totalPages, 15) }).map((_, i) => (
+                                        <div 
+                                          key={i} 
+                                          onClick={() => setCurrentPage(i + 1)}
+                                          className={cn(
+                                            "w-2 h-2 rounded-full cursor-pointer transition-all duration-300",
+                                            currentPage === i + 1 ? "bg-blue-600 w-5" : "bg-slate-300 hover:bg-slate-400"
+                                          )}
+                                        />
+                                      ))}
+                                    </div>
+
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      disabled={currentPage === totalPages || totalPages === 0}
+                                      onClick={() => {
+                                        if (currentPage < totalPages) {
+                                          setCurrentPage(prev => prev + 1);
+                                        } else {
+                                          const catList = ["all", ...productCategoryOrder];
+                                          const currentIdx = catList.indexOf(productCategoryFilter);
+                                          if (currentIdx < catList.length - 1) {
+                                            setProductCategoryFilter(catList[currentIdx + 1]);
+                                            setCurrentPage(1);
+                                          }
+                                        }
+                                      }}
+                                      className="h-9 gap-2 font-bold text-[10px] uppercase tracking-widest bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                                    >
+                                      Next <ArrowRight className="w-3.5 h-3.5" />
+                                    </Button>
+                                  </div>
+                                </div>
+
+                                <div className="space-y-6">
+                                  {paginatedItems.map((boqItem: BOMItem, pIdx: number) => {
+                                    const boqIdx = boqItems.findIndex(bi => bi.id === boqItem.id);
+                                    // Use the global index in the sorted list to ensure sequential numbering across categories
+                                    const displayIdx = sortedAllItems.findIndex(bi => bi.id === boqItem.id);
+                                    
+                                    return (
+                                      <div key={boqItem.id} id={`boq-item-card-${boqItem.id}`} className="transition-all duration-300">
+                                        <BoqItemCard boqItem={boqItem} boqIdx={displayIdx} isVersionSubmitted={isVersionSubmitted}
+                                          expandedProductIds={expandedProductIds} setExpandedProductIds={setExpandedProductIds}
+                                          getEditedValue={getEditedValue} updateEditedField={updateEditedField}
+                                          handleDeleteRow={handleDeleteRow} handleFinalizeProduct={handleFinalizeProduct}
+                                          handleAddItem={handleAddItem} loadBoqItemsAndEdits={loadBoqItemsAndEdits} setBoqItems={setBoqItems}
+                                          checkBudgetEarly={checkBudgetEarly} handleSaveProject={handleSaveProject}
+                                          onAnalysis={(name) => setAnalysisProduct(name)}
+                                          isCardDragOver={cardDragOverIdx === boqIdx}
+                                          onCardDragStart={(e) => { cardDragIdxRef.current = boqIdx; e.dataTransfer.effectAllowed = 'move'; }}
+                                          onCardDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setCardDragOverIdx(boqIdx); }}
+                                          onCardDrop={(e) => {
+                                            e.preventDefault();
+                                            setCardDragOverIdx(null);
+                                            const fromIdx = cardDragIdxRef.current;
+                                            if (fromIdx === null || fromIdx === boqIdx) return;
+                                            const reordered = [...boqItems];
+                                            const [moved] = reordered.splice(fromIdx, 1);
+                                            reordered.splice(boqIdx, 0, moved);
+                                            setBoqItems(reordered);
+                                            apiFetch('/api/boq-items/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ itemIds: reordered.map(i => i.id) }) }).catch(console.error);
+                                            cardDragIdxRef.current = null;
+                                          }}
+                                          mismatches={activeMismatches.filter(m => m.boqItemId === boqItem.id)}
+                                          isCompactView={isCompactView}
+                                          onSaveAsTemplate={(item) => {
+                                            setTemplateToSave(item);
+                                            setNewTemplateName(parseTableData(item.table_data).product_name || item.estimator);
+                                            setShowSaveTemplateDialog(true);
+                                          }}
+                                          editedFields={editedFields}
+                                          comments={comments}
+                                          users={users}
+                                          currentUser={user}
+                                          onAddComment={(versionId: string, itemId?: string) => {
+                                            const productName = parseTableData(boqItem.table_data).product_name || boqItem.estimator;
+                                            setCommentTarget({ type: itemId ? 'item' : 'product', id: itemId || boqItem.id, name: itemId ? `${productName} - Item ${itemId}` : productName });
+                                            setShowCommentDialog(true);
+                                          }}
+                                          selectedVersionId={selectedVersionId}
+                                          totalProducts={boqItems.length}
+                                          itemCategoryFilter={itemCategoryFilter}
+                                          bomButtonsEnabled={bomButtonsEnabled}
+                                          onProductOrdinalChange={(toIdx) => {
+                                            if (toIdx === displayIdx) return;
+                                            const reordered = [...boqItems];
+                                            const [moved] = reordered.splice(boqIdx, 1);
+                                            reordered.splice(toIdx, 0, moved);
+                                            setBoqItems(reordered);
+                                            apiFetch('/api/boq-items/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ itemIds: reordered.map(i => i.id) }) }).catch(console.error);
+                                          }}
+                                        />
+                                      </div>
+                                    );
+                                  })}
+                                </div>
                               </div>
-                            ))}
+                            );
+                          })()}
                         </div>
                       }
                     </div>

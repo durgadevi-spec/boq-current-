@@ -76,14 +76,18 @@ export function fuzzySearch(query: string, textToSearch: string | string[]): boo
   // Basic strategy: Every original word must have a match (either exact, partial, or via synonym)
   return originalWords.every(word => {
     // 1. Check partial match of the word itself
-    if (searchableText.includes(word)) return true;
+    // For very short queries (1-2 chars), use a more restrictive 'starts with' or whole word check
+    if (word.length <= 2) {
+      const wordsInText = searchableText.split(/[^a-z0-9]/).filter(Boolean);
+      if (wordsInText.some(w => w.startsWith(word))) return true;
+    } else {
+      if (searchableText.includes(word)) return true;
+    }
 
     // 2. Check synonyms/related terms
     const synonyms = SYNONYMS[word] || [];
     if (synonyms.some(syn => searchableText.includes(syn))) return true;
 
-    // 3. Reverse check (if searchableText has a word that is a synonym for the query word)
-    // Actually expansion is more reliable.
     return false;
   });
 }

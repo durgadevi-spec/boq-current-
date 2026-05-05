@@ -202,15 +202,19 @@ export default function MaterialPicker({
       .map((material) => {
         const name = (material.name || "").toLowerCase();
         const code = (material.code || "").toLowerCase();
+        const shop = (material.shop_name || "").toLowerCase();
+        const cat = (material.category || "").toLowerCase();
 
-        const isMatch = fuzzySearch(query, [name, code]);
+        const isMatch = fuzzySearch(query, [name, code, shop, cat]);
         if (!isMatch) return null;
 
         let score = 0;
         if (name.includes(query)) score += 100;
+        if (shop.includes(query)) score += 70;
         const queryWords = query.split(/\s+/).filter(Boolean);
         if (queryWords.some(word => name.includes(word))) score += 50;
         if (code.includes(query)) score += 30;
+        if (cat.includes(query)) score += 20;
 
         return { material, score };
       })

@@ -37,6 +37,7 @@ type BOMItem = {
 
 export default function BomApprovals() {
     const [approvals, setApprovals] = useState<BOMApproval[]>([]);
+    const [searchQuery, setSearchQuery] = useState("");
     const [loading, setLoading] = useState(true);
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [expandedItems, setExpandedItems] = useState<BOMItem[]>([]);
@@ -264,7 +265,19 @@ export default function BomApprovals() {
         setSelectedIds(prev => checked ? [...prev, id] : prev.filter(item => item !== id));
     };
 
-    const visibleApprovals = approvals;
+    const searchLower = searchQuery.toLowerCase().trim();
+    const visibleApprovals = approvals.filter(a => {
+        if (!searchLower) return true;
+        const statusText = (a.status || "").replace(/_/g, " ").toLowerCase();
+        return (
+            (a.project_name || "").toLowerCase().includes(searchLower) ||
+            (a.project_client || "").toLowerCase().includes(searchLower) ||
+            (a.type || "bom").toLowerCase().includes(searchLower) ||
+            statusText.includes(searchLower) ||
+            (`v${a.version_number}`).toLowerCase().includes(searchLower) ||
+            (a.version_number?.toString() || "").includes(searchLower)
+        );
+    });
 
     const toggleSelectAll = (checked: boolean) => {
         if (!checked) {
@@ -812,8 +825,20 @@ export default function BomApprovals() {
                             <div className="flex justify-center p-20">
                                 <Loader2 className="h-10 w-10 animate-spin text-primary" />
                             </div>
+                        ) : approvals.length === 0 ? (
+                            <div className="text-center py-20 text-muted-foreground italic">
+                                No BOM approval requests found.
+                            </div>
                         ) : (
                             <>
+                                <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                    <Input
+                                        placeholder="Search by project, client, type, or status..."
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        className="max-w-md bg-white"
+                                    />
+                                </div>
                                 {selectedIds.length > 0 && (
                                     <div className="mb-4 p-3 bg-blue-50 border border-blue-100 rounded-lg flex items-center gap-4 animate-in fade-in slide-in-from-top-2">
                                         <div className="text-sm font-bold text-blue-700">{selectedIds.length} selected</div>
@@ -825,7 +850,7 @@ export default function BomApprovals() {
                                 )}
                                 {visibleApprovals.length === 0 ? (
                                     <div className="text-center py-20 text-muted-foreground italic">
-                                        No BOM approval requests found.
+                                        No BOM approval requests match your search.
                                     </div>
                                 ) : (
                                     <Tabs defaultValue={editRequests.length > 0 ? "edit-requests" : "bom-approvals"} className="w-full">

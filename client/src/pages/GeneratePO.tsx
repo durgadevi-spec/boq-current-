@@ -810,9 +810,10 @@ export default function GeneratePo() {
   }, [selectedVersionId]);
 
   useEffect(() => {
-    if (!selectedVersionId) { setBoqItems([]); setEditedFields({}); editedFieldsRef.current = {}; return; }
+    if (!selectedVersionId) { setBoqItems([]); setEditedFields({}); editedFieldsRef.current = {}; setPreviewVendors([]); setIsPOModalOpen(false); return; }
     loadBoqItemsAndEdits();
     loadHistory();
+    setPreviewVendors([]); // Clear old vendors when version changes
   }, [selectedVersionId, loadBoqItemsAndEdits, loadHistory]);
 
   // Auto-select project from URL

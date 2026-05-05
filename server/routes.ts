@@ -828,6 +828,7 @@ export async function registerRoutes(
         is_locked BOOLEAN DEFAULT FALSE,
         last_template_snapshot JSONB,
         is_last_final BOOLEAN DEFAULT FALSE,
+        category_order JSONB,
         UNIQUE(project_id, type, version_number)
       )
     `);
@@ -851,6 +852,7 @@ export async function registerRoutes(
     await query(`ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS project_client VARCHAR(255)`);
     await query(`ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS project_location TEXT`);
     await query(`ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS rejection_reason TEXT`);
+    await query(`ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS category_order JSONB`);
 
     // Populate project_name, project_client and project_location from boq_projects where missing
     await query(`
@@ -4049,7 +4051,7 @@ export async function registerRoutes(
     requireRole("admin", "software_team", "purchase_team", "pre_sales", "product_manager", "contractor"),
     async (req: Request, res: Response) => {
       try {
-        const { name, subcategory, taxCodeType, taxCodeValue, hsn_code, sac_code, image } = req.body;
+        const { name, subcategory, taxCdidodeType, taxCodeValue, hsn_code, sac_code, image } = req.body;
         console.log('/api/products POST body ->', { name, subcategory, taxCodeType, taxCodeValue, hsn_code, sac_code, image: image ? "present" : "absent" });
 
         if (!name) {
@@ -4090,7 +4092,7 @@ export async function registerRoutes(
     try {
       const { approvedOnly } = req.query;
       let queryStr = `
-        SELECT
+        SELECT DISTINCT ON (p.id)
           p.*,
           s.name as subcategory_name,
           c.name as category_name,
@@ -4131,7 +4133,7 @@ export async function registerRoutes(
         queryStr += ` WHERE p.id IN (SELECT DISTINCT product_id FROM product_approvals WHERE status = 'approved')`;
       }
 
-      queryStr += ` ORDER BY p.created_at DESC`;
+      queryStr += ` ORDER BY p.id, p.created_at DESC`;
       const result = await query(queryStr);
       const archivedIds = archiveService.getArchivedItemIds('products');
       const trashedIds = archiveService.getTrashedItemIds('products');
@@ -5138,7 +5140,7 @@ export async function registerRoutes(
         await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS is_disabled BOOLEAN DEFAULT FALSE");
 
         const { type } = req.query;
-        let q = `SELECT id, project_id, project_name, project_client, project_location, version_number, status, type, is_locked, is_last_final, is_disabled, created_at, updated_at 
+        let q = `SELECT id, project_id, project_name, project_client, project_location, version_number, status, type, is_locked, is_last_final, is_disabled, created_at, updated_at, category_order 
                  FROM boq_versions 
                  WHERE project_id = $1`;
         const params = [projectId];
@@ -5621,6 +5623,32 @@ export async function registerRoutes(
       } catch (err) {
         console.error("POST /api/boq-versions/:id/request-edit error:", err);
         res.status(500).json({ message: "Failed to submit edit request" });
+      }
+    }
+  );
+
+  // POST /api/boq-versions/:id/category-order - Persist custom category sequence
+  app.post(
+    "/api/boq-versions/:id/category-order",
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const { id } = req.params;
+        const { categoryOrder } = req.body;
+
+        if (!Array.isArray(categoryOrder)) {
+          return res.status(400).json({ message: "categoryOrder array is required" });
+        }
+
+        await query(
+          "UPDATE boq_versions SET category_order = $1, updated_at = NOW() WHERE id = $2",
+          [JSON.stringify(categoryOrder), id]
+        );
+
+        res.json({ message: "Category order saved successfully" });
+      } catch (err) {
+        console.error("POST /api/boq-versions/:id/category-order error:", err);
+        res.status(500).json({ message: "Failed to save category order" });
       }
     }
   );
@@ -8383,7 +8411,7 @@ export async function registerRoutes(
       if (!versionId) return res.status(400).json({ message: "versionId is required" });
 
       const itemsResult = await query(
-        `SELECT table_data FROM boq_items WHERE version_id = $1`,
+        `SELECT table_data FROM boq_items WHERE version_id = $1 AND user_added = true`,
         [versionId]
       );
 
@@ -8467,7 +8495,7 @@ export async function registerRoutes(
 
         // 1. Get BOM items for this version
         const itemsResult = await query(
-          "SELECT * FROM boq_items WHERE project_id = $1 AND version_id = $2",
+          "SELECT * FROM boq_items WHERE project_id = $1 AND version_id = $2 AND user_added = true",
           [projectId, versionId],
         );
 
@@ -9087,11 +9115,10 @@ export async function registerRoutes(
       let queryStr = `
         SELECT po.*, po.total as total_amount, p.name as project_name,
         COALESCE(po.vendor_name, s.name, po.vendor_id) as vendor_name,
-        COALESCE(po.version_number, (
+        COALESCE(po.version_number::TEXT, (
           SELECT CAST(v.version_number AS TEXT)
           FROM boq_versions v
-          WHERE v.project_id = po.project_id AND v.created_at <= po.created_at
-          ORDER BY v.created_at DESC
+          WHERE v.id::TEXT = po.version_id::TEXT
           LIMIT 1
         )) as version_number
         FROM purchase_orders po
