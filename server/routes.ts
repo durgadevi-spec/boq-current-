@@ -4051,7 +4051,7 @@ export async function registerRoutes(
     requireRole("admin", "software_team", "purchase_team", "pre_sales", "product_manager", "contractor"),
     async (req: Request, res: Response) => {
       try {
-        const { name, subcategory, taxCdidodeType, taxCodeValue, hsn_code, sac_code, image } = req.body;
+        const { name, subcategory, taxCodeType, taxCodeValue, hsn_code, sac_code, image } = req.body;
         console.log('/api/products POST body ->', { name, subcategory, taxCodeType, taxCodeValue, hsn_code, sac_code, image: image ? "present" : "absent" });
 
         if (!name) {

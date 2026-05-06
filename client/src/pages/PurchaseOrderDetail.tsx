@@ -892,7 +892,7 @@ export default function PurchaseOrderDetail() {
                 {/* Actions Header */}
                 <div className="flex justify-between items-start no-print">
                     <div className="space-y-1">
-                        <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={() => setLocation(mode === "approval" ? "/po-approvals" : "/purchase-orders")}>
+                        <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={() => setLocation(mode === "approval" ? "/po-approvals" : `/purchase-orders?projectId=${po?.project_id}`)}>
                             <ChevronLeft className="h-4 w-4 mr-1" /> Back to List
                         </Button>
                         <h1 className="text-2xl font-bold tracking-tight flex items-center gap-3">

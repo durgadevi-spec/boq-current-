@@ -96,8 +96,14 @@ export default function PurchaseOrders() {
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
     const [statusFilter, setStatusFilter] = useState<string>("all");
-    const [projectFilter, setProjectFilter] = useState<string>("all");
-    const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+    const [projectFilter, setProjectFilter] = useState<string>(() => {
+        const params = new URLSearchParams(window.location.search);
+        return params.get("projectId") || "all";
+    });
+    const [selectedProjectId, setSelectedProjectId] = useState<string>(() => {
+        const params = new URLSearchParams(window.location.search);
+        return params.get("projectId") || "";
+    });
     const [projectSearch, setProjectSearch] = useState<string>("");
     const [deletingPo, setDeletingPo] = useState<PurchaseOrder | null>(null);
 
@@ -387,6 +393,7 @@ export default function PurchaseOrders() {
     const handleBackToProjects = () => {
         setSelectedProjectId("");
         setProjectFilter("all");
+        setLocation("/purchase-orders");
     };
 
     const filteredPOs = purchaseOrders.filter((po) => {
