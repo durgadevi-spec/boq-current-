@@ -1344,10 +1344,11 @@ export default function FinalizeBoq() {
             const typeValues = Object.values(restoredOverrideTypes);
             const percentageCount = typeValues.filter(t => t === 'percentage').length;
             const valueCount = typeValues.filter(t => t === 'value').length;
-            if (percentageCount === 0 && valueCount === 0) {
-              setGlobalOverrideType('percentage');
+            // Strongly default to percentage mode
+            if (valueCount > percentageCount) {
+              setGlobalOverrideType('value');
             } else {
-              setGlobalOverrideType(percentageCount >= valueCount ? 'percentage' : 'value');
+              setGlobalOverrideType('percentage');
             }
           }
           setHideSystemTotalFooter(sysTotalHidden);
