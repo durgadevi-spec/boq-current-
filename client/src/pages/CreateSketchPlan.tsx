@@ -2976,13 +2976,15 @@ export default function CreateSketchPlan() {
                         setItems(nextItems);
                         if (sortBy !== "none") setSortBy("none");
                       }} key={`${sortBy}-${currentPage}`}>
-                        {paginatedItems.map((item, pIdx) => (
-                          <SketchPlanRow
-                            key={item.id}
-                            item={item}
-                            idx={items.indexOf(item)}
-                            displayIdx={sortedAllItems.findIndex(it => it.id === item.id) + 1}
-                            itemsLength={items.length}
+                        {paginatedItems.map((item, pIdx) => {
+                          const globalIdx = (currentPage - 1) * pageSize + pIdx;
+                          return (
+                            <SketchPlanRow
+                              key={item.id}
+                              item={item}
+                              idx={items.indexOf(item)} // Keep original items index for reordering logic
+                              displayIdx={globalIdx + 1}
+                              itemsLength={items.length}
                             isLocked={isLocked || userRole === "supplier"}
                             isFiltering={isFiltering}
                             isCompact={isCompact}
@@ -3017,7 +3019,8 @@ export default function CreateSketchPlan() {
                             cloneItem={cloneItem}
                             categories={categories}
                           />
-                        ))}
+                          );
+                        })}
                       </Reorder.Group>
                     </table>
                   </div>
