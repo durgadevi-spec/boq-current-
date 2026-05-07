@@ -349,6 +349,8 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
   const [reorderInit, setReorderInit] = useState(false);
 
   const calculationTarget = localTarget || 1;
+
+
   let displayLines: any[] = step11Items;
   let isEngineBased = false;
 
@@ -494,6 +496,9 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
 
   // Final grand total reflects the standard rate if used
   const grandTotalValue = useStandardRate ? (standardRate * calculationTarget) : totalAmount;
+  const displayQty = isLumpSum ? 1 : calculationTarget;
+  const displayRate = isLumpSum ? grandTotalValue : ratePerUnit;
+
   const roundOffAdjustment = grandTotalValue - totalAmount;
 
   const images = parseImages(tableData.image);
@@ -564,9 +569,10 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
         <div className="flex items-center gap-3 shrink-0">
           {isCompactView && (
             <div className="flex items-center gap-3 text-[11px] bg-white px-2 py-0.5 rounded border border-slate-200 shadow-sm whitespace-nowrap">
-              <span className="font-semibold text-slate-500">Rate: <span className="text-blue-700 font-bold">₹{ratePerUnit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
+              <span className="font-semibold text-slate-500">Rate: <span className="text-blue-700 font-bold">₹{displayRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
               <div className="w-px h-3 bg-slate-300"></div>
               <span className="font-semibold text-slate-500">Total: <span className="text-slate-900 font-bold">₹{grandTotalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
+
             </div>
           )}
           {tableData.is_finalized && <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded font-bold text-[10px]">Finalized</span>}
@@ -654,12 +660,13 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
                 <div className="flex flex-col bg-white border border-slate-200 rounded px-3 py-1 shadow-sm min-w-[100px]">
                   <span className="text-[9px] text-slate-400 font-black uppercase tracking-tight">Rate per {isLumpSum ? "LS" : (tableData.configBasis?.requiredUnitType || "Unit")}</span>
                   <div className="text-sm font-black text-blue-700 leading-tight">
-                    ₹{ratePerUnit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ₹{displayRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                 </div>
                 <div className="flex flex-col bg-white border border-slate-200 rounded px-3 py-1 shadow-sm min-w-[100px]">
                   <span className="text-[9px] text-slate-400 font-black uppercase tracking-tight">Grand Total</span>
                   <span className="text-sm font-black text-slate-900 leading-tight">₹{grandTotalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+
                 </div>
               </div>
 
@@ -766,8 +773,13 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
                   <Input
                     type="number"
                     className="h-8 w-24 text-xs font-black text-blue-600 border-blue-200 focus:ring-1 ring-blue-100 bg-white"
-                    value={isLumpSum ? 1 : localTarget}
-                    onChange={(e) => setLocalTarget(parseFloat(e.target.value) || 0)}
+                    value={displayQty}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value) || 0;
+                      if (isLumpSum) return;
+                      setLocalTarget(val);
+                    }}
+
                     disabled={isVersionSubmitted || tableData.is_finalized}
                     onBlur={async (e) => {
                       const newVal = parseFloat(e.target.value);
@@ -1768,6 +1780,9 @@ export default function CreateBom() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [isSinglePage, setIsSinglePage] = useState(false);
+  const [isRefreshingCategories, setIsRefreshingCategories] = useState(false);
+  const [refreshLog, setRefreshLog] = useState<{ itemName: string; from: string; to: string }[]>([]);
+  const [showRefreshLogDialog, setShowRefreshLogDialog] = useState(false);
 
   const productCategories = useMemo(() => {
     const cats = new Set<string>();
@@ -1780,25 +1795,28 @@ export default function CreateBom() {
   }, [boqItems]);
 
   useEffect(() => {
-    // If the version has a saved order, use it
+    let initialOrder: string[] = [];
     if (selectedVersion && (selectedVersion as any).category_order) {
       try {
         const savedOrder = (selectedVersion as any).category_order;
         if (Array.isArray(savedOrder) && savedOrder.length > 0) {
-          setProductCategoryOrder(savedOrder);
-          return;
+          initialOrder = savedOrder;
         }
       } catch (e) { console.error("Failed to parse category_order", e); }
     }
 
-    // Otherwise, derive from current items
-    if (productCategories.length > 0) {
-      setProductCategoryOrder(prev => {
-        const newCats = productCategories.filter(c => !prev.includes(c));
-        const stillPresent = prev.filter(c => productCategories.includes(c));
-        return [...stillPresent, ...newCats];
-      });
-    }
+    setProductCategoryOrder(prev => {
+      // Use initialOrder if this is the first time we're setting state, else use prev
+      const base = (prev.length === 0) ? initialOrder : prev;
+      
+      const newCats = productCategories.filter(c => !base.includes(c));
+      const stillPresent = base.filter(c => productCategories.includes(c));
+      
+      const result = [...stillPresent, ...newCats];
+      // Avoid state updates if nothing changed
+      if (prev.length > 0 && JSON.stringify(result) === JSON.stringify(prev)) return prev;
+      return result;
+    });
   }, [productCategories, selectedVersionId, selectedVersion]);
 
   // Auto-save category order when it changes
@@ -1816,7 +1834,8 @@ export default function CreateBom() {
         }
       };
       
-      const timer = setTimeout(saveOrder, 1000);
+      const timer = setTimeout(saveOrder, 300);
+
       return () => clearTimeout(timer);
     }
   }, [productCategoryOrder, selectedVersionId]);
@@ -2070,8 +2089,13 @@ export default function CreateBom() {
         const created = await resp.json();
         const itemWithParsedData = { ...created, table_data: parseTableData(created.table_data) };
         setBoqItems(prev => [...prev, itemWithParsedData]);
-        setExpandedProductIds(prev => new Set(prev).add(created.id));
+        setExpandedProductIds(prev => {
+          const next = new Set(prev);
+          next.add(created.id);
+          return next;
+        });
         setShowTemplateManager(false);
+
       } else {
         const errorData = await resp.json();
         toast({ title: "Error", description: errorData.message || "Failed to apply template", variant: "destructive" });
@@ -2133,11 +2157,26 @@ export default function CreateBom() {
       toast({ title: "Importing Sketch", description: `Processing ${items.length} items...` });
 
       const batchItems = [];
+      
+      // Get existing items to prevent duplicates from sketch import
+      const existingMap = new Set(boqItems.map(i => {
+        const td = parseTableData(i.table_data);
+        const cat = (td.category_name || td.category || "General").trim().toLowerCase();
+        const name = (td.product_name || i.estimator || "").trim().toLowerCase();
+        return `${cat}|${name}`;
+      }));
 
       for (const item of items) {
         const itemName = (item.item_name || "").toLowerCase().trim();
         const mId = item.material_id || item.id;
-        const area = item.category || "General";
+        const area = (item.category || "General").trim();
+        const areaKey = area.toLowerCase();
+
+        // Check if this item (same area + same name) already exists
+        if (existingMap.has(`${areaKey}|${itemName}`)) {
+          console.log(`Skipping duplicate sketch item: ${area} | ${itemName}`);
+          continue;
+        }
 
         // Try to find a matching product
         const matchedProd = allProds.find(p =>
@@ -2233,14 +2272,14 @@ export default function CreateBom() {
             finalize_description: desc,
             finalize_qty: qty,
             finalize_rate: rate,
-            unit: item.unit || "nos",
+            unit: item.dimension_unit || item.unit || "nos",
             step11_items: [
               {
                 s_no: 1,
                 material_id: mId || null,
                 title: item.item_name || "Sketch Item",
                 description: desc,
-                unit: item.unit || "nos",
+                unit: item.dimension_unit || item.unit || "nos",
                 qty,
                 supply_rate: rate,
                 install_rate: 0,
@@ -2487,7 +2526,145 @@ export default function CreateBom() {
       } catch (e) { console.warn("Backfill error", e); }
       setBoqItems(items);
     } catch { toast({ title: "Error", description: "Failed to load BOQ items", variant: "destructive" }); }
-  }, [selectedVersionId]);
+  }, [selectedVersionId, toast]);
+
+  // ─── Refresh Categories ──────────────────────────────────────────────────────
+  const handleRefreshCategories = useCallback(async () => {
+    if (!selectedVersionId || isRefreshingCategories) return;
+    setIsRefreshingCategories(true);
+    try {
+      const [prodRes, catRes, matTempRes, matRes] = await Promise.all([
+        apiFetch("/api/products"),
+        apiFetch("/api/categories"),
+        apiFetch("/api/material-templates"),
+        apiFetch("/api/materials")
+      ]);
+
+      if (!prodRes.ok || !catRes.ok || !matTempRes.ok || !matRes.ok) throw new Error("Failed to fetch master data");
+
+      const pd = await prodRes.json();
+      const mtd = await matTempRes.json();
+      const md = await matRes.json();
+
+      const prodById = Object.fromEntries((pd.products || []).map((p: any) => [p.id, p]));
+      const matTempById = Object.fromEntries((mtd.templates || []).map((m: any) => [m.id, m]));
+      const matById = Object.fromEntries((md.materials || []).map((m: any) => [m.id, m]));
+
+      const changeLog: { itemName: string; from: string; to: string }[] = [];
+      const updateTasks: Promise<void>[] = [];
+
+      for (const item of boqItems) {
+        const td = parseTableData(item.table_data);
+        let hasChanges = false;
+        let updatedTd = JSON.parse(JSON.stringify(td));
+        const itemName = td.product_name || item.estimator || "Unknown Item";
+
+        if (td.product_id) {
+          const masterProd = prodById[td.product_id];
+          if (masterProd) {
+            const currentCatName = (td.category_name || "").trim();
+            const currentCat = (td.category || "").trim();
+            const latestProdCat = (masterProd.category_name || masterProd.category || "").trim();
+
+            if (latestProdCat) {
+              if (currentCatName && currentCatName.toLowerCase() !== latestProdCat.toLowerCase()) {
+                updatedTd.category_name = latestProdCat;
+                hasChanges = true;
+                changeLog.push({ itemName: `${itemName}`, from: currentCatName, to: latestProdCat });
+              }
+              if (currentCat && currentCat.toLowerCase() !== latestProdCat.toLowerCase()) {
+                updatedTd.category = latestProdCat;
+                hasChanges = true;
+                if (currentCat !== currentCatName) {
+                  changeLog.push({ itemName: `${itemName}`, from: currentCat, to: latestProdCat });
+                }
+              }
+            }
+          }
+        } else if (td.material_id || item.estimator?.startsWith('material_')) {
+          const matId = td.material_id || item.estimator.replace('material_', '');
+          // Check materials first, then templates
+          const masterMat = matById[matId] || matTempById[matId];
+          
+          if (masterMat && masterMat.category) {
+            const currentCat = (td.category_name || td.category || "").trim();
+            const latestCat = masterMat.category.trim();
+            if (latestCat && currentCat.toLowerCase() !== latestCat.toLowerCase()) {
+              updatedTd.category = latestCat;
+              updatedTd.category_name = latestCat;
+              hasChanges = true;
+              changeLog.push({ itemName: `${itemName}`, from: currentCat || "None", to: latestCat });
+            }
+          }
+        }
+
+        const refreshLines = (lines: any[]) => {
+          if (!Array.isArray(lines)) return lines;
+          let linesChanged = false;
+          const newLines = lines.map(line => {
+            const matId = line.id || line.material_id;
+            if (!matId) return line;
+            const masterMat = matById[matId] || matTempById[matId];
+            if (masterMat) {
+              const currentLineCat = (line.category || "").trim();
+              const latestMatCat = (masterMat.category || "").trim();
+              if (latestMatCat && currentLineCat && currentLineCat.toLowerCase() !== latestMatCat.toLowerCase()) {
+                hasChanges = true;
+                linesChanged = true;
+                changeLog.push({ itemName: line.name || line.title || "Material", from: currentLineCat, to: latestMatCat });
+                return { ...line, category: latestMatCat };
+              }
+            }
+            return line;
+          });
+          return linesChanged ? newLines : lines;
+        };
+
+        if (updatedTd.materialLines) updatedTd.materialLines = refreshLines(updatedTd.materialLines);
+        if (updatedTd.step11_items) updatedTd.step11_items = refreshLines(updatedTd.step11_items);
+
+        if (hasChanges) {
+          const task = apiFetch(`/api/boq-items/${item.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ table_data: updatedTd }),
+          }).then(async (res) => {
+            if (res.ok) {
+              setBoqItems(prev => prev.map(bi => bi.id === item.id ? { ...bi, table_data: updatedTd } : bi));
+            }
+          });
+          updateTasks.push(task);
+        }
+      }
+
+      // Step 3: Run all updates in parallel (fast even for large BOMs)
+      await Promise.all(updateTasks);
+
+      // Step 4: Show result
+      if (changeLog.length === 0) {
+        toast({
+          title: "Already Up to Date",
+          description: "All item categories match the master library.",
+        });
+      } else {
+        setRefreshLog(changeLog);
+        setShowRefreshLogDialog(true);
+        toast({
+          title: "Refresh Complete",
+          description: `${changeLog.length} category details updated successfully.`,
+        });
+      }
+    } catch (err) {
+      console.error("Refresh categories error:", err);
+      toast({
+        title: "Error",
+        description: "Failed to refresh categories. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRefreshingCategories(false);
+    }
+  }, [selectedVersionId, boqItems, isRefreshingCategories]);
 
   const handleSendComment = async () => {
     if (!newComment.trim() || !commentTarget || !selectedVersionId) return;
@@ -2862,7 +3039,9 @@ export default function CreateBom() {
           const sRate = Number(getEditedValue(itemKey, "supply_rate", it.supply_rate ?? 0)) || 0;
           const iRate = Number(getEditedValue(itemKey, "install_rate", it.install_rate ?? 0)) || 0;
           const rate = Number(getEditedValue(itemKey, "rate", sRate + iRate)) || (sRate + iRate);
-          const scaledQty = Number((baseQty * target).toFixed(2));
+          const u = getEditedValue(itemKey, "unit", it.unit || "nos");
+          const isLumpSum = u.toLowerCase() === "ls";
+          const scaledQty = isLumpSum ? baseQty : Number((baseQty * target).toFixed(2));
           cardTotal += Number((scaledQty * rate).toFixed(2));
         });
       }
@@ -3032,7 +3211,7 @@ export default function CreateBom() {
         setBoqItems(newItems);
         
         // Remove from database
-        for (const id of idsToRemove) {
+        for (const id of Array.from(idsToRemove)) {
           await apiFetch(`/api/boq-items/${id}`, { method: "DELETE" });
         }
 
@@ -3150,14 +3329,19 @@ export default function CreateBom() {
         const res = await updateBoqItem(boqItemId, updatedTableData);
         if (!res.ok) throw new Error("Failed to update");
         toast({ title: "Success", description: `Added ${template.name}` });
-        loadBoqItemsAndEdits();
-      } catch { toast({ title: "Error", description: "Failed to add item", variant: "destructive" }); }
-      finally { setIsSaving(false); }
+        // No need to loadBoqItemsAndEdits() here as we updated state locally
+      } catch (err) { 
+        toast({ title: "Error", description: "Failed to add item", variant: "destructive" }); 
+      } finally { 
+        setIsSaving(false); 
+      }
     })();
   };
 
+
   const handleFinalizeProduct = async (boqItemId: string) => {
-    if (!confirm("Mark this product as finalized?")) return;
+    if (!confirm("Mark this product as finalized?") || isSaving) return;
+    setIsSaving(true);
     try {
       const existing = boqItems.find(i => i.id === boqItemId);
       if (!existing) return;
@@ -3165,30 +3349,48 @@ export default function CreateBom() {
       setBoqItems(prev => prev.map(i => i.id === boqItemId ? { ...i, table_data: newTd } : i));
       await updateBoqItem(boqItemId, newTd);
       toast({ title: "Success", description: "Product finalized" });
-      loadBoqItemsAndEdits();
-    } catch { toast({ title: "Error", description: "Failed to finalize", variant: "destructive" }); }
+    } catch { 
+      toast({ title: "Error", description: "Failed to finalize", variant: "destructive" }); 
+    } finally {
+      setIsSaving(false);
+    }
   };
 
+
   const handleDeleteRow = async (boqItemId: string, tableData: any, itemIdx: number, displayItem?: any) => {
+    if (isSaving) return;
+    setIsSaving(true);
     try {
       let computedLen = 0;
       if (tableData?.materialLines && tableData.targetRequiredQty !== undefined) {
-        try { const r = computeBoq(tableData.configBasis, tableData.materialLines, tableData.targetRequiredQty); computedLen = Array.isArray(r.computed) ? r.computed.length : 0; }
-        catch { computedLen = Array.isArray(tableData.materialLines) ? tableData.materialLines.length : 0; }
+        try { 
+          const r = computeBoq(tableData.configBasis, tableData.materialLines, tableData.targetRequiredQty); 
+          computedLen = Array.isArray(r.computed) ? r.computed.length : 0; 
+        } catch { 
+          computedLen = Array.isArray(tableData.materialLines) ? tableData.materialLines.length : 0; 
+        }
       }
       let newTd = { ...tableData };
       if (itemIdx < computedLen) {
-        const ml = [...(tableData.materialLines || [])]; ml.splice(itemIdx, 1); newTd = { ...tableData, materialLines: ml };
+        const ml = [...(tableData.materialLines || [])]; 
+        ml.splice(itemIdx, 1); 
+        newTd = { ...tableData, materialLines: ml };
       } else {
         const s11Idx = displayItem?._s11Idx ?? (itemIdx - computedLen);
-        const s11 = [...(tableData.step11_items || [])]; if (s11Idx >= 0 && s11Idx < s11.length) s11.splice(s11Idx, 1);
+        const s11 = [...(tableData.step11_items || [])]; 
+        if (s11Idx >= 0 && s11Idx < s11.length) s11.splice(s11Idx, 1);
         newTd = { ...tableData, step11_items: s11 };
       }
       setBoqItems(prev => prev.map(i => i.id === boqItemId ? { ...i, table_data: newTd } : i));
       toast({ title: "Item Deleted" });
       await updateBoqItem(boqItemId, newTd);
-    } catch { toast({ title: "Error", description: "Failed to delete item", variant: "destructive" }); }
+    } catch { 
+      toast({ title: "Error", description: "Failed to delete item", variant: "destructive" }); 
+    } finally {
+      setIsSaving(false);
+    }
   };
+
 
   const handleAddToBom = (selectedItems: Step11Item[]) => {
     if (!selectedProjectId || !selectedProduct || !selectedVersionId) { toast({ title: "Error", description: "Select a project, version, and product", variant: "destructive" }); return; }
@@ -3199,6 +3401,22 @@ export default function CreateBom() {
     if (!selectedProduct || !selectedProjectId || !selectedVersionId) return;
     setTargetQtyModalOpen(false);
     try {
+      // Apply all edited fields to pendingItems before saving
+      const updatedPendingItems = pendingItems.map((item, idx) => {
+        const itemKey = `${selectedVersionId}-pending-${idx}`;
+        const edited = editedFieldsRef.current[itemKey] || {};
+        return {
+          ...item,
+          qty: edited.qty !== undefined ? edited.qty : item.qty,
+          unit: edited.unit !== undefined ? edited.unit : item.unit,
+          supply_rate: edited.supply_rate !== undefined ? edited.supply_rate : item.supply_rate,
+          install_rate: edited.install_rate !== undefined ? edited.install_rate : item.install_rate,
+          description: edited.description !== undefined ? edited.description : item.description,
+          rate: edited.rate !== undefined ? edited.rate : item.rate,
+          category: item.category
+        };
+      });
+
       const configRes = await apiFetch(`/api/product-step3-config/${selectedProduct.id}`);
       let configBasis: any = null; let materialLines: any[] = [];
       if (configRes.ok) {
@@ -3227,7 +3445,7 @@ export default function CreateBom() {
       }
       if (!configBasis) {
         configBasis = { requiredUnitType: "Sqft" as UnitType, baseRequiredQty: 1, wastagePctDefault: 0 };
-        materialLines = pendingItems.map(i => ({ materialId: i.id || Math.random().toString(), materialName: i.title || "Item", unit: i.unit || "nos", baseQty: i.qty || 1, supplyRate: i.supply_rate || 0, installRate: i.install_rate || 0, category: i.category || "General" }));
+        materialLines = updatedPendingItems.map(i => ({ materialId: i.id || Math.random().toString(), materialName: i.title || "Item", unit: i.unit || "nos", baseQty: i.qty || 1, supplyRate: i.supply_rate || 0, installRate: i.install_rate || 0, category: i.category || "General" }));
       }
       const tableData = {
         product_name: selectedProduct.name,
@@ -3244,8 +3462,8 @@ export default function CreateBom() {
         configBasis,
         total_cost: configBasis?.total_cost || 0,
         materialLines,
-        step11_items: pendingItems.map(i => ({ ...i, category: i.category || "General" })),
-        finalize_description: pendingItems[0]?.description || "",
+        step11_items: updatedPendingItems.map(i => ({ ...i, category: i.category || "General" })),
+        finalize_description: updatedPendingItems[0]?.description || "",
         created_at: new Date().toISOString()
       };
 
@@ -3531,14 +3749,16 @@ export default function CreateBom() {
     return step11.map((it: any, idx: number) => {
       const key = `${boqItem.id}-${idx}`;
       const baseQty = Number(getEditedValue(key, "qty", it.qty ?? 0)) || 0;
-      const scaledQty = Number((baseQty * target).toFixed(2));
+      const itemUnit = getEditedValue(key, "unit", it.unit ?? "");
+      const isLumpSum = itemUnit.toLowerCase() === "ls";
+      const scaledQty = isLumpSum ? baseQty : Number((baseQty * target).toFixed(2));
       return {
         ...it,
         qty: scaledQty,
         supply_rate: getEditedValue(key, "supply_rate", it.supply_rate ?? 0),
         install_rate: getEditedValue(key, "install_rate", it.install_rate ?? 0),
         description: getEditedValue(key, "description", it.description ?? ""),
-        unit: getEditedValue(key, "unit", it.unit ?? "")
+        unit: itemUnit
       };
     });
   };
@@ -3597,24 +3817,30 @@ export default function CreateBom() {
             const rate = Number(getEditedValue(itemKey, "rate", sRate + iRate)) || (sRate + iRate);
             const desc = getEditedValue(itemKey, "description", it.description || "");
             const u = getEditedValue(itemKey, "unit", it.unit || "nos");
+            // LS qty should not be scaled by targetRequiredQty - it's always a fixed amount
+            const isLumpSum = u.toLowerCase() === "ls";
+            const displayQty = isLumpSum ? qty : qty;
             return {
               ...it, manual: true, itemKey, _s11Idx: s11Idx, qtyPerSqf: it.qtyPerSqf ?? 0,
-              requiredQty: qty, roundOff: "-", description: desc, unit: u,
-              rateSqft: rate, amount: Number((qty * rate).toFixed(2))
+              requiredQty: displayQty, roundOff: "-", description: desc, unit: u,
+              rateSqft: rate, amount: Number((displayQty * rate).toFixed(2))
             };
           }).filter(Boolean);
           displayLines = [...computedLines, ...manualStep11];
         } else {
           const target = tableData.targetRequiredQty || 1;
+
+
           displayLines = step11Items.map((it: any, s11Idx: number) => {
             const itemKey = it.itemKey || `${boqItem.id}-${s11Idx}`;
             const baseQty = Number(getEditedValue(itemKey, "qty", it.qty ?? 0)) || 0;
-            const scaledQty = Number((baseQty * target).toFixed(2));
+            const u = getEditedValue(itemKey, "unit", it.unit || "nos");
+            const isLumpSum = u.toLowerCase() === "ls";
+            const scaledQty = isLumpSum ? baseQty : Number((baseQty * target).toFixed(2));
             const sRate = Number(getEditedValue(itemKey, "supply_rate", it.supply_rate ?? 0)) || 0;
             const iRate = Number(getEditedValue(itemKey, "install_rate", it.install_rate ?? 0)) || 0;
             const rate = Number(getEditedValue(itemKey, "rate", sRate + iRate)) || (sRate + iRate);
             const desc = getEditedValue(itemKey, "description", it.description || "");
-            const u = getEditedValue(itemKey, "unit", it.unit || "nos");
             return {
               ...it, itemKey, _s11Idx: s11Idx,
               qtyPerSqf: baseQty, requiredQty: scaledQty, roundOff: "-", description: desc, unit: u,
@@ -3800,14 +4026,18 @@ export default function CreateBom() {
           displayLines = [...computedLines, ...manualStep11];
         } else {
           const target = td.targetRequiredQty || 1;
+
+
           displayLines = step11Items.map((it: any, idx: number) => {
             const key = it.itemKey || `${boqItem.id}-${idx}`;
             const baseQty = Number(getEditedValue(key, "qty", it.qty ?? 0)) || 0;
-            const scaledQty = Number((baseQty * target).toFixed(2));
+            const u = getEditedValue(key, "unit", it.unit || "nos");
+            const isLumpSum = u.toLowerCase() === "ls";
+            const scaledQty = isLumpSum ? baseQty : Number((baseQty * target).toFixed(2));
             const rate = Number(getEditedValue(key, "rate", (it.supply_rate ?? 0) + (it.install_rate ?? 0)));
             return {
               ...it, title: it.title, description: getEditedValue(key, "description", it.description || ""),
-              unit: getEditedValue(key, "unit", it.unit || "nos"), qtyPerSqf: baseQty, requiredQty: scaledQty, roundOff: "-",
+              unit: u, qtyPerSqf: baseQty, requiredQty: scaledQty, roundOff: "-",
               rate, amount: scaledQty * rate, image: it.image
             };
           });
@@ -4233,11 +4463,31 @@ export default function CreateBom() {
                         <Button onClick={findDuplicatesInBOM} variant="outline" className="border-amber-200 h-full px-4 text-xs font-bold shadow-sm bg-amber-50 text-amber-700 hover:bg-amber-100 flex items-center gap-2" disabled={!selectedProjectId}>
                           <AlertTriangle className="h-4 w-4" /> Check Duplicates
                         </Button>
+                        <Button
+                          onClick={handleRefreshCategories}
+                          variant="outline"
+                          className="border-emerald-200 h-full px-4 text-xs font-bold shadow-sm bg-emerald-50 text-emerald-700 hover:bg-emerald-100 flex items-center gap-2"
+                          disabled={!selectedVersionId || isRefreshingCategories || boqItems.length === 0}
+                          title="Refresh: detect and update any item categories that changed in the master product library"
+                        >
+                          {isRefreshingCategories
+                            ? <Loader2 className="h-4 w-4 animate-spin" />
+                            : <RefreshCw className="h-4 w-4" />}
+                          {isRefreshingCategories ? "Refreshing..." : "Refresh"}
+                        </Button>
                         <Button onClick={() => setShowCompareDialog(true)} variant="outline" className="border-blue-200 h-full px-4 text-xs font-bold shadow-sm bg-blue-50 text-blue-700 hover:bg-blue-100 flex items-center gap-2" disabled={!selectedProjectId}>
                           <ChevronsUpDown className="h-4 w-4" /> Compare
                         </Button>
-                        <Button onClick={handleAddProduct} className="bg-primary text-white h-full px-5 text-xs font-bold shadow-sm" disabled={isVersionSubmitted || !selectedVersionId || !bomButtonsEnabled}>+ Add Product</Button>
-                        <Button onClick={handleAddProductManual} variant="outline" className="border-slate-200 h-full px-5 text-xs font-bold shadow-sm bg-white" disabled={isVersionSubmitted || !selectedVersionId || !bomButtonsEnabled}>+ Add Item</Button>
+                        <Button onClick={handleAddProduct} className="bg-primary text-white h-full px-5 text-xs font-bold shadow-sm" disabled={isVersionSubmitted || !selectedVersionId || !bomButtonsEnabled || isSaving}>
+                          {isSaving ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : null}
+                          + Add Product
+                        </Button>
+
+                        <Button onClick={handleAddProductManual} variant="outline" className="border-slate-200 h-full px-5 text-xs font-bold shadow-sm bg-white" disabled={isVersionSubmitted || !selectedVersionId || !bomButtonsEnabled || isSaving}>
+                          {isSaving ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : null}
+                          + Add Item
+                        </Button>
+
                       </div>
                     </div>
 
@@ -4617,20 +4867,23 @@ export default function CreateBom() {
                         ? <div className="text-gray-500 text-center py-4">No products added yet. Click Add Product +</div>
                         : <div className="space-y-6">
                           {(() => {
-                            const sortedAllItems = [...boqItems].sort((a, b) => {
-                              if (productCategoryOrder.length === 0) return 0;
-                              const tda = parseTableData(a.table_data);
-                              const tdb = parseTableData(b.table_data);
-                              const catA = tda.category_name || tda.category || "General";
-                              const catB = tdb.category_name || tdb.category || "General";
-                              const indexA = productCategoryOrder.indexOf(catA);
-                              const indexB = productCategoryOrder.indexOf(catB);
-                              if (indexA !== -1 && indexB !== -1) {
-                                if (indexA !== indexB) return indexA - indexB;
-                              } else if (indexA !== -1) return -1;
-                              else if (indexB !== -1) return 1;
-                              return 0;
-                            });
+                            const sortedAllItems = boqItems.map((item, index) => ({ item, index }))
+                              .sort((a, b) => {
+                                if (productCategoryOrder.length === 0) return a.index - b.index;
+                                const tda = parseTableData(a.item.table_data);
+                                const tdb = parseTableData(b.item.table_data);
+                                const catA = tda.category_name || tda.category || "General";
+                                const catB = tdb.category_name || tdb.category || "General";
+                                const indexA = productCategoryOrder.indexOf(catA);
+                                const indexB = productCategoryOrder.indexOf(catB);
+                                if (indexA !== -1 && indexB !== -1) {
+                                  if (indexA !== indexB) return indexA - indexB;
+                                } else if (indexA !== -1) return -1;
+                                else if (indexB !== -1) return 1;
+                                return a.index - b.index;
+                              })
+                              .map(x => x.item);
+
 
                             const filteredItems = sortedAllItems.filter(item => {
                               const td = parseTableData(item.table_data);
@@ -4852,8 +5105,16 @@ export default function CreateBom() {
 
       {/* Small floating Add buttons at bottom-right (duplicate of top actions) */}
       <div className="fixed right-6 bottom-24 z-50 flex flex-col items-end gap-2 md:gap-3">
-        <Button onClick={handleAddProduct} className="bg-primary text-white h-8 px-3 text-xs font-semibold shadow-sm" disabled={isVersionSubmitted || !selectedVersionId || !bomButtonsEnabled} title="Add Product">+ Add Product</Button>
-        <Button onClick={handleAddProductManual} variant="outline" className="border-slate-200 h-8 px-3 text-xs font-semibold shadow-sm bg-white" disabled={isVersionSubmitted || !selectedVersionId || !bomButtonsEnabled} title="Add Item">+ Add Item</Button>
+        <Button onClick={handleAddProduct} className="bg-primary text-white h-8 px-3 text-xs font-semibold shadow-sm" disabled={isVersionSubmitted || !selectedVersionId || !bomButtonsEnabled || isSaving} title="Add Product">
+          {isSaving ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : null}
+          + Add Product
+        </Button>
+
+        <Button onClick={handleAddProductManual} variant="outline" className="border-slate-200 h-8 px-3 text-xs font-semibold shadow-sm bg-white" disabled={isVersionSubmitted || !selectedVersionId || !bomButtonsEnabled || isSaving} title="Add Item">
+          {isSaving ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : null}
+          + Add Item
+        </Button>
+
         <Button
           onClick={() => setIsCompactView(!isCompactView)}
           variant="outline"
@@ -4892,7 +5153,11 @@ export default function CreateBom() {
                 addon += (Number(i.qty) || 1) * ((Number(i.supply_rate) || 0) + (Number(i.install_rate) || 0));
               });
               return currentProjectValue + (addon * targetRequiredQty);
-            }, confirmAddToBom)} className="bg-primary text-white font-bold">Add to BOM</Button>
+            }, confirmAddToBom)} className="bg-primary text-white font-bold" disabled={isSaving}>
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Add to BOM
+            </Button>
+
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -5576,6 +5841,52 @@ export default function CreateBom() {
         isOpen={!!analysisProduct}
         onClose={() => setAnalysisProduct(null)}
       />
+
+      {/* ── Refresh Categories Log Dialog ───────────────────────────────────── */}
+      <Dialog open={showRefreshLogDialog} onOpenChange={setShowRefreshLogDialog}>
+        <DialogContent className="sm:max-w-[560px] max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-emerald-700">
+              <RefreshCw className="h-5 w-5" />
+              Category Refresh Complete
+            </DialogTitle>
+            <DialogDescription>
+              {refreshLog.length} item {refreshLog.length === 1 ? "category" : "categories"} updated
+              to match the master product library. All other data (quantities, rates,
+              materials) is untouched.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto space-y-2 py-2 pr-1">
+            {refreshLog.map((entry, i) => (
+              <div
+                key={i}
+                className="flex items-start gap-2.5 p-2.5 bg-emerald-50 border border-emerald-100 rounded-md text-sm"
+              >
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 mt-0.5 shrink-0" />
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-semibold text-slate-800">{entry.itemName}</span>
+                  <span className="text-slate-500 text-xs">
+                    Category changed from{" "}
+                    <span className="font-bold text-red-500">{entry.from}</span>
+                    {" "}→{" "}
+                    <span className="font-bold text-emerald-700">{entry.to}</span>
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <DialogFooter className="mt-4 pt-4 border-t">
+            <Button
+              onClick={() => setShowRefreshLogDialog(false)}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+            >
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Duplicate Checker Dialog */}
       <Dialog open={showDuplicateDialog} onOpenChange={setShowDuplicateDialog}>
