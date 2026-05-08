@@ -2116,8 +2116,13 @@ export default function AdminDashboard() {
                                                 <div className="text-sm font-medium">{mat.name}</div>
                                                 <div className="text-sm">₹{Number(mat.rate || 0).toLocaleString()}</div>
                                               </div>
-                                              <div className="text-xs text-blue-600">
-                                                {mat.code || 'No code'} • brand: {mat.brandName || '-'} • model: {mat.modelNumber || '-'}
+                                              <div className="text-[10px] sm:text-xs flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-1">
+                                                <span className="font-bold text-slate-700 bg-slate-100 px-1 rounded uppercase tracking-tighter text-[9px]">{mat.code || 'No code'}</span>
+                                                <span className="text-slate-800 font-medium">Brand:</span><span className="text-blue-600 font-semibold">{mat.brandName || mat.brand || mat.brandname || '-'}</span>
+                                                <span className="text-slate-300">•</span>
+                                                <span className="text-slate-800 font-medium">Unit:</span><span className="text-blue-600 font-semibold">{mat.unit || '-'}</span>
+                                                <span className="text-slate-300">•</span>
+                                                <span className="text-slate-800 font-medium">Model:</span><span className="text-blue-600 font-semibold">{mat.modelNumber || mat.model || '-'}</span>
                                               </div>
                                             </div>
                                           ))
@@ -2331,8 +2336,15 @@ export default function AdminDashboard() {
                                 <div className="flex items-center justify-between">
                                   <div>
                                     <div className="font-bold text-base text-foreground">{mat.name}</div>
-                                    <div className="text-xs text-blue-600">
-                                      {mat.code || 'No code'} • brand: {mat.brandName || '-'} • model: {mat.modelNumber || '-'} • ₹{mat.rate}/{mat.unit}
+                                    <div className="text-[10px] sm:text-xs flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-1">
+                                      <span className="font-bold text-slate-700 bg-slate-100 px-1 rounded uppercase tracking-tighter text-[9px]">{mat.code || 'No code'}</span>
+                                      <span className="text-slate-800 font-medium">Brand:</span><span className="text-blue-600 font-semibold">{mat.brandName || mat.brand || mat.brandname || '-'}</span>
+                                      <span className="text-slate-300">•</span>
+                                      <span className="text-slate-800 font-medium">Unit:</span><span className="text-blue-600 font-semibold">{mat.unit || '-'}</span>
+                                      <span className="text-slate-300">•</span>
+                                      <span className="text-slate-800 font-medium">Model:</span><span className="text-blue-600 font-semibold">{mat.modelNumber || mat.model || '-'}</span>
+                                      <span className="text-slate-300">•</span>
+                                      <span className="text-slate-800 font-medium">Rate:</span><span className="text-green-600 font-bold">₹{Number(mat.rate || 0).toLocaleString()}/{mat.unit || '-'}</span>
                                     </div>
                                     <div className="text-[10px] text-muted-foreground italic">
                                       Shop: {localShops.find(s => s.id === (mat.shopId || mat.shop_id))?.name || 'Unassigned'}
@@ -3791,8 +3803,20 @@ export default function AdminDashboard() {
                                         </Badge>
                                       )}
                                     </div>
-                                    <div className="text-xs text-muted-foreground">
-                                      {template.code}
+                                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                                      <span className="font-medium">{template.code}</span>
+                                      {(template.hsn_code || template.hsnCode) && (
+                                        <>
+                                          <span className="text-slate-300">•</span>
+                                          <span className="text-slate-800 font-medium">HSN:</span> <span className="text-blue-600 font-semibold">{template.hsn_code || template.hsnCode}</span>
+                                        </>
+                                      )}
+                                      {(template.sac_code || template.sacCode) && (
+                                        <>
+                                          <span className="text-slate-300">•</span>
+                                          <span className="text-slate-800 font-medium">SAC:</span> <span className="text-blue-600 font-semibold">{template.sac_code || template.sacCode}</span>
+                                        </>
+                                      )}
                                     </div>
                                   </div>
                                 </div>
