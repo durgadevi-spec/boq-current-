@@ -796,7 +796,7 @@ export default function CreateSketchPlan() {
   const [isPdfDialogOpen, setIsPdfDialogOpen] = useState(false);
   const [includePlanPhotosInExport, setIncludePlanPhotosInExport] = useState(true);
   const [includeSubNotesInExport, setIncludeSubNotesInExport] = useState(true);
-  const [selectedPdfCols, setSelectedPdfCols] = useState<string[]>(["#", "Item", "Notes", "L", "W", "H", "Qty", "Unit", "Pre Photos", "Post Photos"]
+  const [selectedPdfCols, setSelectedPdfCols] = useState<string[]>(["#", "Category", "Item", "Notes", "L", "W", "H", "Qty", "Unit", "Pre Photos", "Post Photos"]
   );
   const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false);
   const [recipientEmail, setRecipientEmail] = useState("");
@@ -1969,6 +1969,8 @@ export default function CreateSketchPlan() {
           headers.forEach(h => {
             if (h === "#") {
               row.push(dIdx === 0 ? sortedAllItems.findIndex(it => it.id === item.id) + 1 : "");
+            } else if (h === "Category") {
+              row.push(dIdx === 0 ? item.category || "" : "");
             } else if (h === "Item") {
               row.push(dIdx === 0 ? item.item_name : "");
             } else if (h === "Notes") {
@@ -2157,6 +2159,7 @@ export default function CreateSketchPlan() {
         itemDims.forEach((dim: any, dIdx: number) => {
           const row: any = {};
           if (selectedPdfCols.includes("#")) row["S.No"] = dIdx === 0 ? sortedAllItems.findIndex(it => it.id === item.id) + 1 : "";
+          row["Category"] = dIdx === 0 ? item.category || "" : "";
           if (selectedPdfCols.includes("Item")) row["Item Name"] = dIdx === 0 ? item.item_name : "";
           if (selectedPdfCols.includes("Notes")) row["Notes"] = dIdx === 0 ? item.description : (dim.note || "");
           if (selectedPdfCols.includes("L")) row["L"] = dim.length || "";
@@ -2182,6 +2185,7 @@ export default function CreateSketchPlan() {
       // 5. Basic cell width adjustments (approximation)
       const colWidths = [
         { wch: 8 },  // S.No
+        { wch: 15 }, // Category
         { wch: 25 }, // Item Name
         { wch: 35 }, // Notes
         { wch: 8 },  // L
