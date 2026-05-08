@@ -602,7 +602,7 @@ export default function FinalizeBoq() {
     if (savedOrder.length > 0 && categoryFilter === "all" && !boqSearchTerm) {
       // Create a map of IDs to their original positions in boqItems to ensure secondary stability
       const originalPos = new Map(boqItems.map((it, idx) => [it.id, idx]));
-      
+
       filtered.sort((a, b) => {
         const catA = getItemCategory(a);
         const catB = getItemCategory(b);
@@ -610,9 +610,9 @@ export default function FinalizeBoq() {
         const idxB = savedOrder.indexOf(catB);
         const orderA = idxA === -1 ? savedOrder.length : idxA;
         const orderB = idxB === -1 ? savedOrder.length : idxB;
-        
+
         if (orderA !== orderB) return orderA - orderB;
-        
+
         // Secondary sort by original position in boqItems
         return (originalPos.get(a.id) || 0) - (originalPos.get(b.id) || 0);
       });
@@ -687,6 +687,93 @@ export default function FinalizeBoq() {
   const [roundOff, setRoundOff] = useState<boolean>(false);
   const [isColumnManagerOpen, setIsColumnManagerOpen] = useState(false);
   const [isAnalysisDialogOpen, setIsAnalysisDialogOpen] = useState(false);
+
+  // Feature: Select All state
+  const isAllSelected = paginatedBoqItems.length > 0 && paginatedBoqItems.every(i => selectedProductIds.has(i.id));
+  const isSomeSelected = !isAllSelected && paginatedBoqItems.some(i => selectedProductIds.has(i.id));
+
+  const handleSelectAll = (checked: boolean) => {
+    const nextSelected = new Set(selectedProductIds);
+    if (checked) {
+      paginatedBoqItems.forEach(item => nextSelected.add(item.id));
+    } else {
+      paginatedBoqItems.forEach(item => nextSelected.delete(item.id));
+    }
+    setSelectedProductIds(nextSelected);
+  };
+
+  const handleLabourOnlyBulk = async () => {
+    if (selectedProductIds.size === 0) {
+      toast({ title: "No items selected", description: "Please select items first.", variant: "destructive" });
+      return;
+    }
+
+    const selectedItems = boqItems.filter(i => selectedProductIds.has(i.id));
+
+    // Helper to find column name flexibly
+    const findCol = (cols: any[], terms: string[], exclude: string[] = ["amount", "total"]) => {
+      return cols.find(c => {
+        const n = c.name.toLowerCase();
+        return terms.every(t => n.includes(t.toLowerCase())) && !exclude.some(e => n.includes(e));
+      });
+    };
+
+    const itemsToUpdate = selectedItems.filter(item => {
+      const cols = customColumns[item.id] || [];
+      const supplyCol = findCol(cols, ["supply", "rate"]);
+      const labourCol = findCol(cols, ["labour", "rate"]) || findCol(cols, ["install", "rate"]) || findCol(cols, ["service", "rate"]);
+      return supplyCol && labourCol;
+    });
+
+    if (itemsToUpdate.length === 0) {
+      toast({
+        title: "No matching items",
+        description: "Selected items must have both 'Supply Rate' and 'Labour Rate' columns.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    toast({ title: "Applying Labour Only", description: `Updating ${itemsToUpdate.length} item(s)...` });
+
+    try {
+      const updates = itemsToUpdate.map(async (item) => {
+        const cols = customColumns[item.id] || [];
+        const nextVals = { ...(customColumnValues[item.id] || {}) };
+        const rowVals = { ...(nextVals[0] || {}) };
+
+        const supplyCol = findCol(cols, ["supply", "rate"]);
+        const labourCol = findCol(cols, ["labour", "rate"]) || findCol(cols, ["install", "rate"]) || findCol(cols, ["service", "rate"]);
+
+        if (supplyCol && labourCol) {
+          // Update column configurations (percentage values)
+          const nextCols = cols.map(c => {
+            if (c.name === supplyCol.name) return { ...c, percentageValue: 0 };
+            if (c.name === labourCol.name) return { ...c, percentageValue: 100 };
+            return c;
+          });
+
+          // Update pre-calculated values
+          rowVals[supplyCol.name] = "0";
+          rowVals[labourCol.name] = "100";
+          nextVals[0] = rowVals;
+
+          // Update local state optimistically
+          setCustomColumns(prev => ({ ...prev, [item.id]: nextCols }));
+          setCustomColumnValues(prev => ({ ...prev, [item.id]: nextVals }));
+
+          // Persist to DB
+          return saveItemLayout(item.id, nextCols, nextVals);
+        }
+      });
+
+      await Promise.all(updates);
+      toast({ title: "Success", description: `Labour Only applied to ${itemsToUpdate.length} items.` });
+    } catch (e) {
+      console.error("Labour Only bulk update failed:", e);
+      toast({ title: "Error", description: "Failed to apply bulk action.", variant: "destructive" });
+    }
+  };
 
   const handleHideSelectedRows = async (hide: boolean) => {
     if (selectedProductIds.size === 0) return;
@@ -945,8 +1032,8 @@ export default function FinalizeBoq() {
       const overrideInputVal = parseFloat(overrideRates[item.id] ?? globalOverrideValue ?? "0") || 0;
 
 
-      const overrideRateRaw = (overrideType === "percentage") 
-        ? (baseRate * (1 + overrideInputVal / 100)) 
+      const overrideRateRaw = (overrideType === "percentage")
+        ? (baseRate * (1 + overrideInputVal / 100))
         : (overrideInputVal !== 0 ? overrideInputVal : baseRate);
 
 
@@ -1355,7 +1442,7 @@ export default function FinalizeBoq() {
             const typeValues = Object.values(restoredOverrideTypes);
             const percentageCount = typeValues.filter(t => t === 'percentage').length;
             const valueCount = typeValues.filter(t => t === 'value').length;
-            
+
             if (valueCount > percentageCount) {
               setGlobalOverrideType('value');
             } else {
@@ -2347,17 +2434,11 @@ export default function FinalizeBoq() {
         const rowCalculatedValues: { [colName: string]: number } = {};
 
         // Calculate effective override rate based on type
-        const overrideType = globalOverrideType;
+        const itemOverrideType = overrideTypes[boqItem.id] ?? globalOverrideType;
         const overrideInputVal = parseFloat((overrideRates[boqItem.id] ?? globalOverrideValue) || "0") || 0;
-        let effectiveOverrideRate = 0;
-        if (overrideType === "percentage") {
-          effectiveOverrideRate = rateSqft * (1 + overrideInputVal / 100);
-
-
-        } else {
-          effectiveOverrideRate = overrideInputVal !== 0 ? overrideInputVal : rateSqft;
-        }
-
+        const effectiveOverrideRate = (itemOverrideType === "percentage")
+          ? (rateSqft * (1 + overrideInputVal / 100))
+          : (overrideInputVal !== 0 ? overrideInputVal : rateSqft);
 
         const overrideTotalVal = effectiveOverrideRate * displayQty;
         let currentRunningTotal = (overrideRates[boqItem.id] || globalOverrideValue) ? overrideTotalVal : totalVal;
@@ -2394,7 +2475,7 @@ export default function FinalizeBoq() {
           }
           else if (colName === "Qty") rowValues[colName] = roundOff ? Math.round(displayQty) : Number(displayQty.toFixed(2));
           else if (colName === "Total Value (₹)") rowValues[colName] = roundOff ? Math.round(totalVal) : Number(totalVal.toFixed(2));
-          else if (colName === "Override Rate") rowValues[colName] = roundOff ? Math.round(effectiveOverrideRate) : Number(effectiveOverrideRate.toFixed(2));
+          else if (colName === "Override Rate") rowValues[colName] = overrideRates[boqItem.id] ?? globalOverrideValue ?? "0";
           else if (colName === "Override Total") rowValues[colName] = roundOff ? Math.round(effectiveOverrideRate * displayQty) : Number((effectiveOverrideRate * displayQty).toFixed(2));
           else {
             const currentCol = allCols.find(c => c.name === colName);
@@ -2419,10 +2500,9 @@ export default function FinalizeBoq() {
                 const multiplierSource = (itemCol as any).multiplierSource || "manual";
                 const manualMultiplier = (itemCol as any).percentageValue || 0;
                 const operator = (itemCol as any).operator || "%";
-                const _oRate = parseFloat(overrideRates[boqItem.id] || "0") || 0;
                 const _ctx: SrcCtx = {
                   totalVal, rate: rateSqft, qty: displayQty,
-                  overrideRate: _oRate, overrideTotal: _oRate * displayQty,
+                  overrideRate: effectiveOverrideRate, overrideTotal: effectiveOverrideRate * displayQty,
                   rowCalc: rowCalculatedValues, customVals: customColumnValues[boqItem.id]?.[0] || {},
                 };
                 const baseVal = resolveSource(baseSource, _ctx);
@@ -2653,15 +2733,11 @@ export default function FinalizeBoq() {
         const customVals: string[] = [];
 
         // Calculate effective override rate based on type
-        const overrideType = globalOverrideType;
+        const itemOverrideType = overrideTypes[boqItem.id] ?? globalOverrideType;
         const overrideInputVal = parseFloat((overrideRates[boqItem.id] ?? globalOverrideValue) || "0") || 0;
-        let effectiveOverrideRate = 0;
-        if (overrideType === "percentage") {
-          effectiveOverrideRate = rateSqft * (1 + overrideInputVal / 100);
-        } else {
-
-          effectiveOverrideRate = overrideInputVal !== 0 ? overrideInputVal : rateSqft;
-        }
+        const effectiveOverrideRate = (itemOverrideType === "percentage")
+          ? (rateSqft * (1 + overrideInputVal / 100))
+          : (overrideInputVal !== 0 ? overrideInputVal : rateSqft);
 
         const overrideTotalVal = effectiveOverrideRate * displayQty;
         let runningTotal = (overrideRates[boqItem.id] || globalOverrideValue) ? overrideTotalVal : totalVal;
@@ -2716,7 +2792,7 @@ export default function FinalizeBoq() {
         if (selectedPdfExportCols.includes("Qty")) row.push(roundOff ? Math.round(displayQty).toString() : displayQty.toFixed(2));
         if (selectedPdfExportCols.includes("Rate")) row.push(roundOff ? Math.round(rateSqft).toString() : rateSqft.toFixed(2));
         if (selectedPdfExportCols.includes("Total")) row.push(roundOff ? Math.round(totalVal).toString() : totalVal.toFixed(2));
-        if (selectedPdfExportCols.includes("Override Rate")) row.push(roundOff ? Math.round(effectiveOverrideRate).toString() : effectiveOverrideRate.toFixed(2));
+        if (selectedPdfExportCols.includes("Override Rate")) row.push(overrideRates[boqItem.id] ?? globalOverrideValue ?? "0");
         if (selectedPdfExportCols.includes("Override Total")) row.push(roundOff ? Math.round(effectiveOverrideRate * displayQty).toString() : (effectiveOverrideRate * displayQty).toFixed(2));
 
         allCols.forEach((col, idx) => {
@@ -3972,6 +4048,15 @@ export default function FinalizeBoq() {
                     <Button
                       variant="outline"
                       size="sm"
+                      className="h-9 px-4 text-[12px] font-bold uppercase border-indigo-300 text-indigo-600 hover:bg-indigo-50 hover:border-indigo-400 transition-all shadow-sm h-9"
+                      disabled={selectedProductIds.size === 0}
+                      onClick={handleLabourOnlyBulk}
+                    >
+                      <Users className="w-3.5 h-3.5 mr-1.5" /> Labour Only
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
                       className="h-9 px-4 text-[12px] font-bold uppercase border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400 transition-all shadow-sm"
                       disabled={selectedProductIds.size === 0}
                       onClick={() => {
@@ -4134,9 +4219,9 @@ export default function FinalizeBoq() {
                     <thead>
                       {/* Excel-style Column Labels */}
                       <tr className="bg-gray-100 border-b border-gray-200 text-[11px] font-semibold text-gray-700">
-                        {!hiddenPredefinedCols.sno && <th className="border-r border-gray-200 py-1.5 w-10 text-center">A</th>}
-                        {!hiddenPredefinedCols.sno && <th className="border-r border-gray-200 py-1.5 w-12 text-center text-gray-700">B</th>}
-                        {!hiddenPredefinedCols.product && <th className="border-r border-gray-200 py-1.5 text-center w-64">C</th>}
+                        {!hiddenPredefinedCols.sno && <th className="sticky left-0 z-50 bg-gray-100 border-r border-gray-200 py-1.5 w-10 text-center">A</th>}
+                        {!hiddenPredefinedCols.sno && <th className="sticky left-[40px] z-50 bg-gray-100 border-r border-gray-200 py-1.5 w-[80px] text-center text-gray-700">B</th>}
+                        {!hiddenPredefinedCols.product && <th className="sticky left-[120px] z-50 bg-gray-100 border-r border-gray-200 py-1.5 text-center w-64">C</th>}
                         {!hiddenPredefinedCols.description && <th className="border-r border-gray-200 py-1.5 text-center w-72">D</th>}
                         {!hiddenPredefinedCols.hsn && <th className="border-r border-gray-200 py-1.5 text-center w-24">E</th>}
                         {!hiddenPredefinedCols.sac && <th className="border-r border-gray-200 py-1.5 text-center w-24">F</th>}
@@ -4167,21 +4252,26 @@ export default function FinalizeBoq() {
                         onReorder={handleColumnReorder}
                         className="bg-gray-200 text-slate-900 border-b border-gray-300 text-[12px] font-semibold uppercase tracking-wider shadow-sm"
                       >
-                        <th className="border-r border-gray-300 px-2 py-2.5 text-center w-10">
+                        <th className="sticky left-0 z-50 bg-gray-200 border-r border-gray-300 px-2 py-2.5 text-center w-10">
                           <GripVertical size={18} className="mx-auto text-gray-500" />
                         </th>
                         {!hiddenPredefinedCols.sno && (
-                          <th className="border-r border-gray-300 px-1 py-2.5 text-left min-w-[30px] w-12 text-[11px] group relative">
-                            <div className="flex items-center justify-between gap-1">
-                              <span>S.No</span>
+                          <th className="sticky left-[40px] z-50 bg-gray-200 border-r border-gray-300 px-2 py-2.5 text-left min-w-[70px] w-[80px] text-[11px] group relative">
+                            <div className="flex items-center gap-2">
+                              <Checkbox
+                                checked={isAllSelected}
+                                onCheckedChange={(checked) => handleSelectAll(!!checked)}
+                                className={isSomeSelected ? "opacity-50" : ""}
+                              />
+                              <span className="font-black text-[11px] uppercase tracking-normal text-slate-800">S.NO</span>
                               {!isVersionSubmitted && (
-                                <button onClick={() => handleHideColumn("S.No", true)} className="text-gray-400 hover:text-orange-500 opacity-0 group-hover:opacity-100 transition-opacity" title="Hide Column"><EyeOff size={10} /></button>
+                                <button onClick={() => handleHideColumn("S.No", true)} className="text-gray-400 hover:text-orange-500 opacity-0 group-hover:opacity-100 transition-opacity ml-auto" title="Hide Column"><EyeOff size={10} /></button>
                               )}
                             </div>
                           </th>
                         )}
                         {!hiddenPredefinedCols.product && (
-                          <th className="border-r border-gray-300 px-3 py-2.5 text-left min-w-[250px] text-[11px] group relative">
+                          <th className="sticky left-[120px] z-50 bg-gray-200 border-r border-gray-300 px-3 py-2.5 text-left min-w-[250px] text-[11px] group relative">
                             <div className="flex items-center justify-between gap-1">
                               <span>Product / Material</span>
                               {!isVersionSubmitted && (
@@ -4270,7 +4360,7 @@ export default function FinalizeBoq() {
                                   onChange={async (e) => {
                                     const newType = e.target.value as "value" | "percentage";
                                     setGlobalOverrideType(newType);
-                                    
+
                                     // Update local state for all rows
                                     setOverrideTypes(prev => {
                                       const updated = { ...prev };
@@ -4309,7 +4399,7 @@ export default function FinalizeBoq() {
                                 onBlur={async () => {
                                   const newVal = globalOverrideValue;
                                   if (!newVal) return;
-                                  
+
                                   toast({ title: "Applying Global Rate", description: `Updating all items...` });
                                   const updates = boqItems.map(item => {
                                     return saveItemLayout(item.id, undefined, undefined, undefined, undefined, newVal, undefined, undefined, globalOverrideType);
@@ -4498,20 +4588,19 @@ export default function FinalizeBoq() {
                             className={`hover:bg-blue-50/40 cursor-default transition-colors border-b border-gray-100 ${isSelected ? "bg-blue-50/60" : "bg-white"}`}
                           >
                             {!hiddenPredefinedCols.sno && (
-                              <td className="border-r px-2 py-1.5 text-center bg-gray-50/50 align-middle" style={{ cursor: "grab" }}>
+                              <td className="sticky left-0 z-40 border-r px-2 py-1.5 text-center bg-gray-50 align-middle shadow-[1px_0_0_0_#e5e7eb]" style={{ cursor: "grab" }}>
                                 <div className="flex flex-col items-center gap-1">
                                   <span className="text-[10px] font-bold text-gray-500">
-                                    {boqItems.findIndex(i => i.id === boqItem.id) + 1}
+                                    {((currentPage - 1) * pageSize) + boqIdx + 1}
                                   </span>
                                   <div className="text-gray-300 hover:text-blue-400 transition-colors flex items-center justify-center">
-
                                     <GripVertical size={14} className="mx-auto" />
                                   </div>
                                 </div>
                               </td>
                             )}
                             {!hiddenPredefinedCols.sno && (
-                              <td className="border-r px-2 py-1.5 text-center align-middle">
+                              <td className={`sticky left-[40px] z-40 border-r px-2 py-1.5 text-center align-middle shadow-[1px_0_0_0_#e5e7eb] ${isSelected ? "bg-blue-50" : "bg-white"}`}>
                                 <div className="flex flex-col items-center gap-2">
                                   <input
                                     type="checkbox"
@@ -4530,7 +4619,7 @@ export default function FinalizeBoq() {
                               </td>
                             )}
                             {!hiddenPredefinedCols.product && (
-                              <td className="border-r px-1.5 py-1 font-medium text-gray-800 text-[10px] align-middle">
+                              <td className={`sticky left-[120px] z-40 border-r px-1.5 py-1 font-medium text-gray-800 text-[10px] align-middle shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] ${isSelected ? "bg-blue-50" : "bg-white"}`}>
                                 <div className="flex items-center gap-2">
                                   {(() => {
                                     const imgSrc = parseProductImage(tableData.image);
