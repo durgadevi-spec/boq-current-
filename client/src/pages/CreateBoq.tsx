@@ -348,7 +348,7 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
   const [localItems, setLocalItems] = useState<any[]>([]);
   const [reorderInit, setReorderInit] = useState(false);
 
-  const calculationTarget = localTarget || 1;
+  const calculationTarget = (localTarget === undefined || localTarget === null) ? 1 : localTarget;
 
 
   let displayLines: any[] = step11Items;
@@ -777,14 +777,14 @@ function BoqItemCard({ boqItem, boqIdx, isVersionSubmitted, expandedProductIds, 
                     onChange={(e) => {
                       const val = parseFloat(e.target.value) || 0;
                       if (isLumpSum) return;
-                      setLocalTarget(val);
+                      setLocalTarget(Math.max(0, val));
                     }}
 
                     disabled={isVersionSubmitted || tableData.is_finalized}
                     onBlur={async (e) => {
                       const newVal = parseFloat(e.target.value);
                       const currentVal = tableData.targetRequiredQty ?? 1;
-                      if (isNaN(newVal) || newVal === currentVal || newVal <= 0) { setLocalTarget(currentVal); return; }
+                      if (isNaN(newVal) || newVal === currentVal || newVal < 0) { setLocalTarget(currentVal); return; }
                       try {
                         const updatedTd = { ...tableData, targetRequiredQty: newVal };
                         const resp = await apiFetch(`/api/boq-items/${boqItem.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ table_data: updatedTd }) });
@@ -3773,7 +3773,7 @@ export default function CreateBom() {
       const exportData: any[] = [];
 
       // Main Header
-      const mainHeaders = ["Sl", "Item", "Shop", "Description", "Unit", "Qty/Unit", "Required Qty", "Round off", "Rate/Unit", "Amount"];
+      const mainHeaders = ["Sl", "Area/Category", "Item", "Shop", "Description", "Unit", "Qty/Unit", "Required Qty", "Round off", "Rate/Unit", "Amount"];
       exportData.push(["BILL OF QUANTITIES (BOQ)"]);
       exportData.push([`Project: ${selectedProject?.name || "-"}`]);
       exportData.push([`Client: ${selectedProject?.client || "-"}`]);
@@ -3792,7 +3792,7 @@ export default function CreateBom() {
         const hsnFull = hsnCode ? ` [${hsnType.toUpperCase()}: ${hsnCode}]` : "";
 
         // Product header row
-        exportData.push([(boqIdx + 1).toString(), (productName + hsnFull).toUpperCase(), "", tableData.finalize_description || "", "", "", "", "", "", ""]);
+        exportData.push([(boqIdx + 1).toString(), tableData.category || "-", (productName + hsnFull).toUpperCase(), "", tableData.finalize_description || "", "", "", "", "", "", ""]);
 
         let displayLines: any[] = [];
         let isEngineBased = false;
@@ -3853,6 +3853,7 @@ export default function CreateBom() {
         displayLines.forEach((l: any, idx: number) => {
           const rowData = [
             `${boqIdx + 1}.${idx + 1}`,
+            tableData.category || "-",
             l.title || "-",
             l.shop_name || "-",
             l.description || "-",
@@ -3893,6 +3894,7 @@ export default function CreateBom() {
       // Add some basic styling/formatting
       worksheet['!cols'] = [
         { wch: 5 },  // Sl
+        { wch: 20 }, // Area/Category
         { wch: 30 }, // Item
         { wch: 15 }, // Shop
         { wch: 50 }, // Description
@@ -3979,7 +3981,7 @@ export default function CreateBom() {
       doc.text("BILL OF QUANTITIES (BOQ)", pageWidth / 2, 25, { align: "center" });
 
       // 3. Prepare Table columns and body
-      const tableHeaders = ["Sl", "Img", "Item / Component", "Shop", "Description", "Unit", "Qty/Unit", "Req Qty", "R.Off", "Rate", "Total (₹)"];
+      const tableHeaders = ["Sl", "Img", "Area", "Item / Component", "Shop", "Description", "Unit", "Qty/Unit", "Req Qty", "R.Off", "Rate", "Total (₹)"];
       const tableBody: any[] = [];
       const rowImages: { [rowIndex: number]: string } = {};
       let grandTotal = 0;
@@ -3996,6 +3998,7 @@ export default function CreateBom() {
         tableBody.push([
           { content: (boqIdx + 1).toString(), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
           { content: "", styles: { fillColor: [240, 240, 240] } },
+          { content: (td.category || "-").toUpperCase(), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
           { content: (productName + hsnFull).toUpperCase(), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
           { content: td.finalize_description || "", colSpan: 8, styles: { fontStyle: 'italic', fillColor: [240, 240, 240] } }
         ]);
@@ -4051,6 +4054,7 @@ export default function CreateBom() {
           tableBody.push([
             `${boqIdx + 1}.${lIdx + 1}`,
             "", // image cell
+            "", // Area (empty for lines)
             l.title || "-",
             l.shop_name || "-",
             l.description || "-",
@@ -4074,7 +4078,7 @@ export default function CreateBom() {
 
         if (Math.abs(roundOff) >= 0.01) {
           tableBody.push([
-            { content: "", colSpan: 9 },
+            { content: "", colSpan: 10 },
             { content: "Round Off", styles: { fontStyle: 'italic', textColor: [100, 100, 100], fillColor: [252, 252, 252] } },
             { content: (roundOff > 0 ? "+" : "") + roundOff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), styles: { fontStyle: 'italic', textColor: [100, 100, 100], fillColor: [252, 252, 252], halign: 'right' } }
           ]);
@@ -4082,7 +4086,7 @@ export default function CreateBom() {
 
         // Product Subtotal Row
         tableBody.push([
-          { content: "", colSpan: 9, styles: { borderTop: [1, 0, 0, 0] } },
+          { content: "", colSpan: 10, styles: { borderTop: [1, 0, 0, 0] } },
           { content: "Grand Total", styles: { fontStyle: 'bold', fillColor: [250, 250, 250] } },
           { content: productGrandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), styles: { fontStyle: 'bold', fillColor: [250, 250, 250], halign: 'right' } }
         ]);
@@ -4092,7 +4096,7 @@ export default function CreateBom() {
 
       // Grand Total Row (Dark accent)
       tableBody.push([
-        { content: "GRAND TOTAL", colSpan: 10, styles: { fontStyle: 'bold', halign: 'right', fillColor: [41, 41, 41], textColor: [255, 255, 255] } },
+        { content: "GRAND TOTAL", colSpan: 11, styles: { fontStyle: 'bold', halign: 'right', fillColor: [41, 41, 41], textColor: [255, 255, 255] } },
         { content: grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), styles: { fontStyle: 'bold', halign: 'right', fillColor: [41, 41, 41], textColor: [255, 255, 255] } }
       ]);
 
@@ -4108,14 +4112,15 @@ export default function CreateBom() {
         columnStyles: {
           0: { cellWidth: 10 },    // Sl
           1: { cellWidth: 15 },    // Img
-          2: { cellWidth: 35 },    // Item
-          3: { cellWidth: 20 },    // Shop
-          5: { cellWidth: 12 },    // Unit
-          6: { cellWidth: 15 },    // Qty/Unit
-          7: { cellWidth: 15 },    // Req Qty
-          8: { cellWidth: 12 },    // R.Off
-          9: { cellWidth: 20, halign: 'right' },    // Rate
-          10: { cellWidth: 20, halign: 'right' },   // Amount
+          2: { cellWidth: 20 },    // Area
+          3: { cellWidth: 35 },    // Item
+          4: { cellWidth: 20 },    // Shop
+          6: { cellWidth: 12 },    // Unit
+          7: { cellWidth: 15 },    // Qty/Unit
+          8: { cellWidth: 15 },    // Req Qty
+          9: { cellWidth: 12 },    // R.Off
+          10: { cellWidth: 20, halign: 'right' },    // Rate
+          11: { cellWidth: 20, halign: 'right' },   // Amount
         },
         didParseCell: (data: any) => {
           if (data.section === 'body' && data.column.index === 1 && rowImages[data.row.index]) {
