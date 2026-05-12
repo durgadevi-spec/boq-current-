@@ -2155,18 +2155,23 @@ export async function registerRoutes(
         templatesRows = templatesRes.rows || [];
 
         // Query products table - only approved products with at least one approved config
+        // JOIN with material_subcategories and material_categories to get the parent category
         const productsRes = hasQuery
           ? await query(`
-              SELECT DISTINCT ON (p.name) p.id::text, p.name, null as code, null as rate, null as unit, COALESCE(p.subcategory, '') as category, null as image, 'Product' as type 
+              SELECT DISTINCT ON (p.name) p.id::text, p.name, null as code, null as rate, null as unit, COALESCE(c.name, p.subcategory, '') as category, null as image, 'Product' as type 
               FROM products p 
+              LEFT JOIN material_subcategories s ON LOWER(TRIM(p.subcategory)) = LOWER(TRIM(s.name))
+              LEFT JOIN material_categories c ON LOWER(TRIM(s.category)) = LOWER(TRIM(c.name))
               WHERE (p.name ILIKE $1 OR REPLACE(p.name, ' ', '') ILIKE $2)
                 AND EXISTS (
                   SELECT 1 FROM product_approvals pa WHERE pa.product_id = p.id AND pa.status = 'approved'
                 )
               ORDER BY p.name ASC LIMIT 100`, [searchPattern, compactPattern])
           : await query(`
-              SELECT DISTINCT ON (p.name) p.id::text, p.name, null as code, null as rate, null as unit, COALESCE(p.subcategory, '') as category, null as image, 'Product' as type 
+              SELECT DISTINCT ON (p.name) p.id::text, p.name, null as code, null as rate, null as unit, COALESCE(c.name, p.subcategory, '') as category, null as image, 'Product' as type 
               FROM products p 
+              LEFT JOIN material_subcategories s ON LOWER(TRIM(p.subcategory)) = LOWER(TRIM(s.name))
+              LEFT JOIN material_categories c ON LOWER(TRIM(s.category)) = LOWER(TRIM(c.name))
               WHERE EXISTS (
                 SELECT 1 FROM product_approvals pa WHERE pa.product_id = p.id AND pa.status = 'approved'
               )
