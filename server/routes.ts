@@ -8598,41 +8598,39 @@ export async function registerRoutes(
 
       const shopNames = new Set();
 
-      // Helper: recursively extract shop_name from items and their nested step11_items, but ONLY if qty > 0
-      const extractShopNames = (items: any[], scale: number = 1) => {
+      // Helper: extract shop_name from a flat list of items, but ONLY if qty > 0
+      const extractShopNames = (items: any[]) => {
         for (const item of items) {
-          const qty = (parseFloat(item.qty || item.quantity || item.requiredQty || 1) || 0) * scale;
-
+          const qty = parseFloat(item.qty || item.quantity || item.requiredQty || item.baseQty || 0) || 0;
           if (qty > 0) {
             const name = item.shop_name || item.shopName;
             if (name && typeof name === "string" && name.trim().length > 0) {
               shopNames.add(name.trim());
             }
           }
-
-          // Drill into nested step11_items (consolidated products)
-          if (Array.isArray(item.step11_items)) {
-            extractShopNames(item.step11_items, scale);
-          }
         }
-      }
+      };
 
       for (const row of itemsResult.rows) {
         const td = parseSafeTableData(row.table_data);
 
         if (td.materialLines && td.targetRequiredQty !== undefined) {
-          // Engine-based product
-          const base = Number(td.baseRequiredQty || td.configBasis?.baseRequiredQty || 1);
-          const scale = Number(td.targetRequiredQty) / base;
-
-          if (Array.isArray(td.materialLines)) extractShopNames(td.materialLines, scale);
-          if (Array.isArray(td.step11_items)) extractShopNames(td.step11_items, 1);
+          // Engine-based product:
+          // Shop names come ONLY from materialLines (the live config for this version).
+          // step11_items here are user-added manual items (also valid for shop extraction).
+          // Do NOT re-read step11_items as a whole because they may contain stale data
+          // copied from a different approved version's product config.
+          if (Array.isArray(td.materialLines)) extractShopNames(td.materialLines);
+          // Only extract from step11_items that are explicitly marked manual
+          if (Array.isArray(td.step11_items)) {
+            extractShopNames(td.step11_items.filter((it: any) => it.manual === true));
+          }
         } else {
-          // Non-engine product
-          if (Array.isArray(td.step11_items)) extractShopNames(td.step11_items, 1);
-          else if (Array.isArray(td.materialLines)) extractShopNames(td.materialLines, 1);
-          else if (Array.isArray(td.rows)) extractShopNames(td.rows, 1);
-          else if (Array.isArray(td.items)) extractShopNames(td.items, 1);
+          // Non-engine product: shop names come from step11_items directly
+          if (Array.isArray(td.step11_items)) extractShopNames(td.step11_items);
+          else if (Array.isArray(td.materialLines)) extractShopNames(td.materialLines);
+          else if (Array.isArray(td.rows)) extractShopNames(td.rows);
+          else if (Array.isArray(td.items)) extractShopNames(td.items);
         }
       }
 
@@ -8679,12 +8677,16 @@ export async function registerRoutes(
     authMiddleware,
     async (req: Request, res: Response) => {
       try {
-        const { projectId, versionId, versionNumber } = req.body;
+        const { projectId, versionId, versionNumber, shopFilter } = req.body;
         if (!projectId || !versionId) {
           return res
             .status(400)
             .json({ message: "Project ID and Version ID are required" });
         }
+        // shopFilter: optional array of shop names from frontend (the correct set)
+        const allowedShops: Set<string> | null = Array.isArray(shopFilter) && shopFilter.length > 0
+          ? new Set(shopFilter.map((s: string) => s.toLowerCase().trim()))
+          : null;
 
         // 1. Get BOM items for this version
         const itemsResult = await query(
@@ -8756,8 +8758,9 @@ export async function registerRoutes(
             }
 
             // 2. Process manual items in engine-based product (if any)
+            // ONLY include items explicitly marked as manual=true to avoid stale copied data
             if (Array.isArray(tableData.step11_items)) {
-              const manualLines = tableData.step11_items.filter((it: any) => it.manual).map((it: any) => {
+              const manualLines = tableData.step11_items.filter((it: any) => it.manual === true).map((it: any) => {
                 const qty = Number(it.qty || 0);
                 const sRate = Number(it.supply_rate || it.supplyRate || 0);
                 const iRate = Number(it.install_rate || it.installRate || 0);
@@ -8821,6 +8824,8 @@ export async function registerRoutes(
         // 4. For each vendor group, create a PO
         for (const [vendorName, items] of Object.entries(vendorGroups)) {
           if (vendorName === "unassigned") continue;
+          // If shopFilter provided, skip shops not in the allowed list
+          if (allowedShops && !allowedShops.has(vendorName.toLowerCase().trim())) continue;
 
           const poNumber = `Anx-${Math.floor(1000 + Math.random() * 9000)}-${Date.now().toString().slice(-4)}`;
           let totalAmount = 0;
@@ -10988,4 +10993,3 @@ ${list.rows.map((row: any) => `- ${row.name}`).join('\n')}`;
 
   return httpServer;
 }
-
